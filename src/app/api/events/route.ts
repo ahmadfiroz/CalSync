@@ -1,0 +1,129 @@
+import { NextRequest, NextResponse } from "next/server";
+import type { calendar_v3 } from "googleapis";
+import { readStore, isStoreConnected } from "@/lib/store";
+import { resolveClientForCalendar } from "@/lib/accounts";
+import { CALSYNC_SOURCE_KEY } from "@/lib/constants";
+import { listAllEvents } from "@/lib/sync";
+import { listCalendarsMerged } from "@/lib/calendar-directory";
+
+export const runtime = "nodejs";
+
+const MAX_RANGE_DAYS = 90;
+
+function meetingUrlFromEvent(ev: calendar_v3.Schema$Event): string | null {
+  if (ev.hangoutLink) return ev.hangoutLink;
+  const eps = ev.conferenceData?.entryPoints;
+  if (eps?.length) {
+    const video = eps.find((e) => e.entryPointType === "video");
+    if (video?.uri) return video.uri;
+    const any = eps.find((e) => e.uri);
+    if (any?.uri) return any.uri;
+  }
+  return null;
+}
+
+function rowStartMs(
+  start: calendar_v3.Schema$EventDateTime | null | undefined
+): number {
+  if (start?.dateTime) {
+    const t = new Date(start.dateTime).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  }
+  if (start?.date) {
+    const t = new Date(`${start.date}T12:00:00`).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  }
+  return 0;
+}
+
+export async function GET(req: NextRequest) {
+  const s = readStore();
+  if (!isStoreConnected(s)) {
+    return NextResponse.json({ error: "not_connected" }, { status: 401 });
+  }
+
+  let days = Number(req.nextUrl.searchParams.get("days") ?? "30");
+  if (!Number.isFinite(days) || days < 1) days = 30;
+  days = Math.min(Math.floor(days), MAX_RANGE_DAYS);
+
+  const directory = await listCalendarsMerged(s);
+  if (!directory?.length) {
+    return NextResponse.json({ days, events: [], loadErrors: [] });
+  }
+
+  const syncSet = new Set(s.syncCalendarIds ?? []);
+  const selectedCals = directory.filter((c) => syncSet.has(c.id));
+  if (!selectedCals.length) {
+    return NextResponse.json({ days, events: [], loadErrors: [] });
+  }
+
+  const timeMin = new Date();
+  const timeMax = new Date(timeMin);
+  timeMax.setDate(timeMax.getDate() + days);
+
+  const loadErrors: string[] = [];
+  const rows: {
+    calendarId: string;
+    calendarSummary: string;
+    accountEmail: string | null;
+    id: string | null;
+    summary: string | null;
+    start: calendar_v3.Schema$EventDateTime | null;
+    end: calendar_v3.Schema$EventDateTime | null;
+    htmlLink: string | null;
+    transparency: string | null;
+    meetingUrl: string | null;
+  }[] = [];
+
+  const settled = await Promise.allSettled(
+    selectedCals.map(async (calInfo) => {
+      const client = await resolveClientForCalendar(s.accounts, calInfo.id);
+      if (!client) {
+        loadErrors.push(
+          `No API client for “${calInfo.summary}” (${calInfo.id}).`
+        );
+        return;
+      }
+      const items = await listAllEvents(client, calInfo.id, timeMin, timeMax);
+      const visible = items.filter(
+        (ev) =>
+          ev.status !== "cancelled" &&
+          !ev.extendedProperties?.private?.[CALSYNC_SOURCE_KEY]
+      );
+      for (const ev of visible) {
+        rows.push({
+          calendarId: calInfo.id,
+          calendarSummary: calInfo.summary,
+          accountEmail: calInfo.accountEmail,
+          id: ev.id ?? null,
+          summary: ev.summary ?? null,
+          start: ev.start ?? null,
+          end: ev.end ?? null,
+          htmlLink: ev.htmlLink ?? null,
+          transparency: ev.transparency ?? null,
+          meetingUrl: meetingUrlFromEvent(ev),
+        });
+      }
+    })
+  );
+
+  for (const r of settled) {
+    if (r.status === "rejected") {
+      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      loadErrors.push(msg);
+    }
+  }
+
+  rows.sort((a, b) => {
+    const ka = rowStartMs(a.start);
+    const kb = rowStartMs(b.start);
+    if (ka !== kb) return ka - kb;
+    return (a.summary ?? "").localeCompare(b.summary ?? "");
+  });
+
+  return NextResponse.json({
+    days,
+    events: rows,
+    loadErrors,
+  });
+}

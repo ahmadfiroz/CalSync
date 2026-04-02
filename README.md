@@ -1,6 +1,8 @@
 # CalSync
 
-Self-hosted helper for Google Calendar: when you are busy on one calendar, CalSync mirrors **Busy** blocks onto the others in your sync group. Tokens and settings are stored locally in `.data/store.json`.
+Self-hosted helper for Google Calendar: when you are busy on one calendar, CalSync mirrors **Busy** blocks onto the others in your sync group. OAuth refresh tokens and preferences live in `.data/store.json` on the machine that runs the app.
+
+Clone the repo and copy **`.env.example`** to `.env.local` to configure Google OAuth and the public URL (see [Configure environment variables](#3-configure-environment-variables)).
 
 ## Prerequisites
 
@@ -34,6 +36,8 @@ npm install
 
 ### 3. Configure environment variables
 
+The repository includes **`.env.example`** as a safe template (no secrets). Copy it and fill in your values:
+
 1. Copy the example env file:
 
    ```bash
@@ -62,11 +66,14 @@ Open [http://localhost:3000](http://localhost:3000). You will be redirected to s
 
 ### 5. Use the dashboard
 
-1. Connect one or more Google accounts and grant calendar access.
-2. Under **Calendars in sync group**, select at least two writable calendars you want to keep in sync.
-3. Click **Save selection**, then **Run sync now** (or rely on push/polling if configured).
+After you sign in, the dashboard has two areas:
+
+- **Upcoming events** — Lists events in the next 7, 30, or 90 days for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/video links, and a link to open the event in Google Calendar.
+- **Sync setup** — Connect or disconnect Google accounts, pick **Calendars in sync group** (choose at least two writable calendars you want kept in sync), **Save selection**, then **Run sync now** (or rely on push/polling if configured).
 
 Refresh tokens and preferences are written to `.data/store.json` on this machine. Include `.data/` in backups if you move servers.
+
+**API (optional):** Authenticated sessions can call `GET /api/events?days=30` (1–90) for JSON of the same upcoming-events window used by the dashboard.
 
 ### 6. Production build (optional)
 

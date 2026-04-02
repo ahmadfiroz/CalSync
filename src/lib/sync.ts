@@ -37,7 +37,7 @@ function parseMirrorKey(
   return typeof v === "string" && v.length > 0 ? v : null;
 }
 
-async function listAllEvents(
+export async function listAllEvents(
   cal: calendar_v3.Calendar,
   calendarId: string,
   timeMin: Date,

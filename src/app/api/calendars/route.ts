@@ -1,52 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readStore, isStoreConnected } from "@/lib/store";
 import { getCalendarClient } from "@/lib/google";
+import { listCalendarsMerged } from "@/lib/calendar-directory";
 
 export const runtime = "nodejs";
 
-export type ListedCal = {
-  id: string;
-  summary: string;
-  primary?: boolean;
-  accountId: string;
-  accountEmail: string | null;
-};
-
-async function listCalendarsMerged(): Promise<ListedCal[] | null> {
-  const s = readStore();
-  if (!isStoreConnected(s)) return null;
-  const byId = new Map<string, ListedCal>();
-  for (const acc of s.accounts) {
-    const cal = getCalendarClient(acc.refreshToken);
-    let pageToken: string | undefined;
-    do {
-      const res = await cal.calendarList.list({
-        maxResults: 250,
-        pageToken,
-        showHidden: false,
-      });
-      for (const c of res.data.items ?? []) {
-        if (!c.id) continue;
-        if (!byId.has(c.id)) {
-          byId.set(c.id, {
-            id: c.id,
-            summary: c.summary || c.id,
-            primary: Boolean(c.primary),
-            accountId: acc.id,
-            accountEmail: acc.email ?? null,
-          });
-        }
-      }
-      pageToken = res.data.nextPageToken ?? undefined;
-    } while (pageToken);
-  }
-  const items = Array.from(byId.values());
-  items.sort((a, b) => a.summary.localeCompare(b.summary));
-  return items;
-}
+export type { ListedCal } from "@/lib/calendar-directory";
 
 export async function GET() {
-  const items = await listCalendarsMerged();
+  const items = await listCalendarsMerged(readStore());
   if (!items) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }

@@ -19,6 +19,105 @@ type Cal = {
   accountEmail: string | null;
 };
 
+type ListedEvent = {
+  calendarId: string;
+  calendarSummary: string;
+  accountEmail: string | null;
+  id: string | null;
+  summary: string | null;
+  start: { dateTime?: string | null; date?: string | null } | null;
+  end: { dateTime?: string | null; date?: string | null } | null;
+  htmlLink: string | null;
+  transparency: string | null;
+  meetingUrl: string | null;
+};
+
+function startOfLocalDay(d: Date): number {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+}
+
+function parseGCalDate(isoDate: string): Date {
+  return new Date(`${isoDate}T12:00:00`);
+}
+
+/** Matches Google Calendar all-day end (exclusive): one day if end = start + 1 day. */
+function formatEventSchedule(ev: ListedEvent): string {
+  const s = ev.start;
+  const e = ev.end;
+  if (!s) return "—";
+
+  if (s.date && !s.dateTime) {
+    const sd = s.date;
+    const ed = e?.date;
+    if (!ed) {
+      return parseGCalDate(sd).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+    }
+    const sdt = parseGCalDate(sd);
+    const edt = parseGCalDate(ed);
+    const dayMs = 86_400_000;
+    const span = edt.getTime() - sdt.getTime();
+    if (span <= dayMs) {
+      return sdt.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+    }
+    const endInclusive = new Date(edt);
+    endInclusive.setDate(endInclusive.getDate() - 1);
+    return `${sdt.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  }
+
+  if (!s.dateTime) return "—";
+  const start = new Date(s.dateTime);
+  if (Number.isNaN(start.getTime())) return "—";
+  const end = e?.dateTime ? new Date(e.dateTime) : null;
+  if (!end || Number.isNaN(end.getTime())) {
+    return start.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  const now = new Date();
+  const today0 = startOfLocalDay(now);
+  const tomorrow0 = today0 + 86_400_000;
+  const start0 = startOfLocalDay(start);
+
+  let datePrefix: string;
+  if (start0 === today0) datePrefix = "Today";
+  else if (start0 === tomorrow0) datePrefix = "Tomorrow";
+  else {
+    datePrefix = start.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  const sameDay = startOfLocalDay(start) === startOfLocalDay(end);
+  const tfmt: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+  };
+  const a = start.toLocaleTimeString(undefined, tfmt);
+  const b = end.toLocaleTimeString(undefined, tfmt);
+
+  if (sameDay) {
+    if (datePrefix === "Today" || datePrefix === "Tomorrow") {
+      return `${datePrefix} ${a}–${b}`;
+    }
+    return `${datePrefix} • ${a}–${b}`;
+  }
+
+  return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+}
+
 export default function Home() {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -47,6 +146,12 @@ export default function Home() {
   const [addBusy, setAddBusy] = useState<"create" | "add" | null>(null);
   const [addErr, setAddErr] = useState<string | null>(null);
   const [calendarOwnerAccountId, setCalendarOwnerAccountId] = useState("");
+  const [dashTab, setDashTab] = useState<"sync" | "events">("events");
+  const [eventsDays, setEventsDays] = useState(30);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsErr, setEventsErr] = useState<string | null>(null);
+  const [eventsRows, setEventsRows] = useState<ListedEvent[]>([]);
+  const [eventsLoadWarnings, setEventsLoadWarnings] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     setLoadErr(null);
@@ -97,6 +202,47 @@ export default function Home() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const savedSyncGroupKey = useMemo(
+    () => (me?.syncCalendarIds ?? []).join("\0"),
+    [me?.syncCalendarIds]
+  );
+
+  useEffect(() => {
+    if (dashTab !== "events" || !me?.connected) return;
+    let cancelled = false;
+    setEventsLoading(true);
+    setEventsErr(null);
+    setEventsLoadWarnings([]);
+    void (async () => {
+      try {
+        const r = await fetch(`/api/events?days=${eventsDays}`);
+        const j = (await r.json()) as {
+          events?: ListedEvent[];
+          loadErrors?: string[];
+          error?: string;
+          message?: string;
+        };
+        if (cancelled) return;
+        if (!r.ok) {
+          throw new Error(j.message || j.error || r.statusText);
+        }
+        setEventsRows(j.events ?? []);
+        setEventsLoadWarnings(j.loadErrors ?? []);
+      } catch (e) {
+        if (!cancelled) {
+          setEventsErr(e instanceof Error ? e.message : String(e));
+          setEventsRows([]);
+          setEventsLoadWarnings([]);
+        }
+      } finally {
+        if (!cancelled) setEventsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dashTab, eventsDays, me?.connected, savedSyncGroupKey]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -272,6 +418,153 @@ export default function Home() {
         </div>
       ) : (
         <div className="space-y-6">
+          <div
+            className="flex gap-1 rounded-lg border border-zinc-800 bg-zinc-950/50 p-1"
+            role="tablist"
+            aria-label="Dashboard sections"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={dashTab === "events"}
+              onClick={() => setDashTab("events")}
+              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                dashTab === "events"
+                  ? "bg-zinc-800 text-zinc-100 shadow-sm"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              Upcoming events
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={dashTab === "sync"}
+              onClick={() => setDashTab("sync")}
+              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                dashTab === "sync"
+                  ? "bg-zinc-800 text-zinc-100 shadow-sm"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              Sync setup
+            </button>
+          </div>
+
+          {dashTab === "events" ? (
+            <section className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+              <div className="space-y-1">
+                <h2 className="text-sm font-medium text-zinc-200">
+                  Upcoming events (sync group)
+                </h2>
+                <p className="text-xs text-zinc-500">
+                  Only calendars you have checked under &ldquo;Calendars in sync
+                  group&rdquo; and saved. Sorted by start time. Meet links come
+                  from Google when the event has conferencing.
+                </p>
+              </div>
+              <label className="inline-flex flex-col gap-1">
+                <span className="text-xs font-medium text-zinc-400">
+                  Time range
+                </span>
+                <select
+                  value={eventsDays}
+                  onChange={(e) => setEventsDays(Number(e.target.value))}
+                  className="w-fit rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                >
+                  <option value={7}>Next 7 days</option>
+                  <option value={30}>Next 30 days</option>
+                  <option value={90}>Next 90 days</option>
+                </select>
+              </label>
+              {eventsErr ? (
+                <p
+                  className="rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-sm text-red-200"
+                  role="alert"
+                >
+                  {eventsErr}
+                </p>
+              ) : null}
+              {eventsLoadWarnings.length > 0 ? (
+                <ul
+                  className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200/90"
+                  role="status"
+                >
+                  {eventsLoadWarnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {eventsLoading ? (
+                <p className="text-sm text-zinc-500">Loading events…</p>
+              ) : eventsRows.length === 0 ? (
+                <p className="text-sm text-zinc-500">
+                  {savedSyncGroupKey === ""
+                    ? "No calendars in your saved sync group. Open Sync setup, check the calendars you want, and click Save selection."
+                    : "No events in this range for your selected calendars (or only cancelled items were returned)."}
+                </p>
+              ) : (
+                <ul className="max-h-[28rem] space-y-4 overflow-y-auto pr-1">
+                  {eventsRows.map((ev) => (
+                    <li
+                      key={`${ev.calendarId}-${ev.id ?? ev.summary}-${formatEventSchedule(ev)}`}
+                      className="border-b border-zinc-800/80 pb-4 last:border-0 last:pb-0"
+                    >
+                      <p className="text-sm font-medium leading-snug text-zinc-100">
+                        {ev.summary?.trim() || "(No title)"}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {ev.accountEmail ?? "Google account"}
+                      </p>
+                      {ev.meetingUrl ? (
+                        <p className="mt-2 text-xs leading-relaxed">
+                          <span className="text-zinc-500">Join meeting: </span>
+                          <a
+                            href={ev.meetingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="break-all text-amber-400/90 underline-offset-2 hover:underline"
+                          >
+                            {ev.meetingUrl}
+                          </a>
+                        </p>
+                      ) : null}
+                      <p className="mt-2 text-xs text-zinc-400">
+                        {formatEventSchedule(ev)}
+                        {ev.transparency === "transparent" ? (
+                          <span className="ml-2 text-zinc-600">
+                            · shown as free
+                          </span>
+                        ) : null}
+                        {ev.htmlLink ? (
+                          <>
+                            <span className="mx-1.5 text-zinc-700">·</span>
+                            <a
+                              href={ev.htmlLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-amber-400/80 underline-offset-2 hover:underline"
+                            >
+                              Calendar
+                            </a>
+                          </>
+                        ) : null}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!eventsLoading ? (
+                <p className="text-[11px] text-zinc-600">
+                  {eventsRows.length} event
+                  {eventsRows.length === 1 ? "" : "s"} in the selected window.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {dashTab === "sync" ? (
+            <>
           <section className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-medium text-zinc-200">
@@ -532,23 +825,10 @@ export default function Home() {
               ) : null}
             </div>
           ) : null}
+            </>
+          ) : null}
         </div>
       )}
-
-      <footer className="mt-auto border-t border-zinc-800 pt-8 text-xs text-zinc-600">
-        CalSync is a self-hosted helper for Google Calendar. Configure OAuth in
-        Google Cloud Console and set{" "}
-        <code className="text-zinc-500">GOOGLE_CLIENT_ID</code>,{" "}
-        <code className="text-zinc-500">GOOGLE_CLIENT_SECRET</code>, and{" "}
-        <code className="text-zinc-500">CALSYNC_PUBLIC_URL</code> in{" "}
-        <code className="text-zinc-500">.env.local</code>. For HTTPS push on
-        serverless, also set{" "}
-        <code className="text-zinc-500">CALSYNC_CRON_SECRET</code> and call{" "}
-        <code className="text-zinc-500">GET /api/cron/renew-watches</code>{" "}
-        daily with{" "}
-        <code className="text-zinc-500">Authorization: Bearer</code> that
-        secret.
-      </footer>
     </main>
   );
 }
