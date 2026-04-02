@@ -542,12 +542,6 @@ export default function Home() {
     };
   } | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [addCalendarId, setAddCalendarId] = useState("");
-  const [addBusy, setAddBusy] = useState<"create" | "add" | null>(null);
-  const [addErr, setAddErr] = useState<string | null>(null);
-  const [calendarOwnerAccountId, setCalendarOwnerAccountId] = useState("");
   const [dashTab, setDashTab] = useState<"sync" | "events">("events");
   const [eventsDays, setEventsDays] = useState(7);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -568,7 +562,6 @@ export default function Home() {
       if (!m.connected) {
         setCalendars([]);
         setSelected(new Set());
-        setCalendarOwnerAccountId("");
         return;
       }
       const cr = await fetch("/api/calendars");
@@ -584,10 +577,6 @@ export default function Home() {
         const primaries = cj.calendars.filter((c) => c.primary).map((c) => c.id);
         setSelected(new Set(primaries));
       }
-      const acctIds = m.accounts?.map((a) => a.id) ?? [];
-      setCalendarOwnerAccountId((cur) =>
-        cur && acctIds.includes(cur) ? cur : acctIds[0] ?? ""
-      );
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -763,46 +752,6 @@ export default function Home() {
     await refresh();
   };
 
-  const postCalendar = async (
-    action: "create" | "add",
-    payload: Record<string, string>
-  ) => {
-    const accountId = calendarOwnerAccountId || me?.accounts?.[0]?.id;
-    if (!accountId) {
-      setAddErr("No Google account selected.");
-      return;
-    }
-    setAddErr(null);
-    setAddBusy(action);
-    try {
-      const r = await fetch("/api/calendars", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, accountId, ...payload }),
-      });
-      const j = (await r.json()) as {
-        ok?: boolean;
-        calendar?: { id: string };
-        error?: string;
-        message?: string;
-      };
-      if (!r.ok) {
-        throw new Error(j.message || j.error || r.statusText);
-      }
-      const newId = j.calendar?.id;
-      setCreateName("");
-      setAddCalendarId("");
-      await refresh();
-      if (newId) {
-        setSelected((prev) => new Set(prev).add(newId));
-      }
-    } catch (e) {
-      setAddErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAddBusy(null);
-    }
-  };
-
   const displayError = useMemo(
     () => urlError || loadErr,
     [urlError, loadErr]
@@ -825,12 +774,6 @@ export default function Home() {
             </button>
           ) : null}
         </div>
-        <p className="text-sm leading-relaxed text-zinc-400">
-          Connect the Google calendars you use. When you are busy on one,
-          CalSync adds matching &ldquo;Busy&rdquo; blocks on the others for the
-          next {90} days. Mirrored blocks are tagged so they are not copied
-          back.
-        </p>
       </header>
 
       {displayError ? (
@@ -877,7 +820,7 @@ export default function Home() {
                   : "border-transparent text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              Upcoming events
+              Meetings
             </button>
             <button
               type="button"
@@ -890,7 +833,7 @@ export default function Home() {
                   : "border-transparent text-zinc-500 hover:text-zinc-300"
               }`}
             >
-              Sync setup
+              Settings
             </button>
           </div>
 
@@ -933,7 +876,7 @@ export default function Home() {
               ) : eventsRows.length === 0 ? (
                 <p className="text-sm text-zinc-500">
                   {savedSyncGroupKey === ""
-                    ? "No calendars in your saved sync group. Open Sync setup, check the calendars you want, and click Save selection."
+                    ? "No calendars in your saved sync group. Open Settings, check the calendars you want, and click Save selection."
                     : "No events in this range for your selected calendars (or only cancelled or “free” items were returned)."}
                 </p>
               ) : (
@@ -1042,127 +985,6 @@ export default function Home() {
             <h2 className="text-sm font-medium text-zinc-200">
               Calendars in sync group
             </h2>
-            <p className="text-xs text-zinc-500">
-              Check every calendar that should both publish and receive busy
-              blocks. You need at least two; each must be writable (owner or
-              &ldquo;Make changes to events&rdquo;) on at least one connected
-              account. After you save, CalSync runs a sync and, when{" "}
-              <code className="rounded bg-zinc-800 px-1 py-0.5 text-zinc-300">
-                CALSYNC_PUBLIC_URL
-              </code>{" "}
-              is HTTPS, registers Google push notifications so changes propagate
-              within a few seconds. Optional: set{" "}
-              <code className="rounded bg-zinc-800 px-1 py-0.5 text-zinc-300">
-                CALSYNC_AUTO_SYNC_INTERVAL_SEC
-              </code>{" "}
-              (e.g. 120) on the server for extra polling while the app is
-              running. You can still use{" "}
-              <code className="rounded bg-zinc-800 px-1 py-0.5 text-zinc-300">
-                POST /api/sync
-              </code>{" "}
-              from a cron job.
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setAddOpen((o) => !o);
-                  setAddErr(null);
-                }}
-                className="rounded-lg border border-zinc-600 bg-zinc-800/50 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
-              >
-                {addOpen ? "Close" : "Add calendar"}
-              </button>
-            </div>
-            {addOpen ? (
-              <div className="space-y-4 border-l border-zinc-800/60 pl-4">
-                {addErr ? (
-                  <p
-                    className="text-xs text-red-300"
-                    role="alert"
-                  >
-                    {addErr}
-                  </p>
-                ) : null}
-                {(me.accounts ?? []).length > 1 ? (
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-zinc-400">
-                      Under which account?
-                    </span>
-                    <select
-                      value={calendarOwnerAccountId}
-                      onChange={(e) => setCalendarOwnerAccountId(e.target.value)}
-                      className="rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-                    >
-                      {(me.accounts ?? []).map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.email ?? a.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-zinc-400">
-                    Create a new calendar
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <input
-                      type="text"
-                      value={createName}
-                      onChange={(e) => setCreateName(e.target.value)}
-                      placeholder="e.g. Work blocks"
-                      className="min-w-[12rem] flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600"
-                    />
-                    <button
-                      type="button"
-                      disabled={addBusy !== null || !createName.trim()}
-                      onClick={() =>
-                        void postCalendar("create", {
-                          summary: createName.trim(),
-                        })
-                      }
-                      className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
-                    >
-                      {addBusy === "create" ? "Creating…" : "Create"}
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2 border-t border-zinc-800 pt-4">
-                  <p className="text-xs font-medium text-zinc-400">
-                    Add an existing calendar you have access to
-                  </p>
-                  <p className="text-[11px] leading-relaxed text-zinc-600">
-                    Paste the calendar ID (often an email like{" "}
-                    <span className="font-mono text-zinc-500">
-                      x@group.calendar.google.com
-                    </span>
-                    ) from Google Calendar → Settings → Integrate calendar.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <input
-                      type="text"
-                      value={addCalendarId}
-                      onChange={(e) => setAddCalendarId(e.target.value)}
-                      placeholder="calendar ID"
-                      className="min-w-[12rem] flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 placeholder:text-zinc-600"
-                    />
-                    <button
-                      type="button"
-                      disabled={addBusy !== null || !addCalendarId.trim()}
-                      onClick={() =>
-                        void postCalendar("add", {
-                          calendarId: addCalendarId.trim(),
-                        })
-                      }
-                      className="rounded-lg border border-zinc-600 bg-transparent px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                    >
-                      {addBusy === "add" ? "Adding…" : "Add to list"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
             <ul className="divide-y divide-zinc-800/40">
               {calendars.map((c) => (
                 <li key={c.id}>
