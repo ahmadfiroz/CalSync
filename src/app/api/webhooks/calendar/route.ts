@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { performFullSyncCoalesced } from "@/lib/run-sync-from-store";
+import { resolveUserIdByChannelId } from "@/lib/store-db";
+import { performFullSyncCoalescedForUser } from "@/lib/run-sync-from-store";
 
 export const runtime = "nodejs";
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+const debounceByUser = new Map<string, ReturnType<typeof setTimeout>>();
 
-function scheduleSyncFromNotification() {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => {
-    debounceTimer = null;
-    void performFullSyncCoalesced();
-  }, 2500);
+function scheduleSyncForUser(userId: string) {
+  const prev = debounceByUser.get(userId);
+  if (prev) clearTimeout(prev);
+  debounceByUser.set(
+    userId,
+    setTimeout(() => {
+      debounceByUser.delete(userId);
+      void performFullSyncCoalescedForUser(userId);
+    }, 2500)
+  );
 }
 
 /**
@@ -28,7 +33,15 @@ export async function POST(req: NextRequest) {
 
   const state = req.headers.get("x-goog-resource-state");
   if (state === "sync" || state === "exists" || state === "not_exists") {
-    scheduleSyncFromNotification();
+    const channelId = req.headers.get("x-goog-channel-id");
+    if (channelId) {
+      try {
+        const userId = await resolveUserIdByChannelId(channelId);
+        if (userId) scheduleSyncForUser(userId);
+      } catch {
+        /* Supabase misconfigured */
+      }
+    }
   }
 
   return new NextResponse(null, { status: 200 });

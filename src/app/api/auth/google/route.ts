@@ -7,7 +7,8 @@ import {
   OAUTH_STATE_MAX_AGE_SEC,
 } from "@/lib/constants";
 import { getAuthUrl } from "@/lib/google";
-import { readStore } from "@/lib/store";
+import { readStoreForUser } from "@/lib/store-db";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 
 export const runtime = "nodejs";
 
@@ -30,8 +31,17 @@ export async function GET(req: NextRequest) {
     jar.delete(OAUTH_INTENT_COOKIE);
   }
 
-  const existing = readStore();
-  const selectAccount = addAccount || (existing?.accounts.length ?? 0) > 0;
+  let accountCount = 0;
+  const sessionTok = jar.get(SESSION_COOKIE)?.value;
+  if (sessionTok) {
+    const payload = await verifySessionToken(sessionTok);
+    if (payload?.userId) {
+      const s = await readStoreForUser(payload.userId);
+      accountCount = s?.accounts.length ?? 0;
+    }
+  }
+
+  const selectAccount = addAccount || accountCount > 0;
   const url = getAuthUrl(state, { selectAccount });
   return NextResponse.redirect(url);
 }

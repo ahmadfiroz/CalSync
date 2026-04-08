@@ -1,4 +1,5 @@
-import { google } from "googleapis";
+import { calendar } from "@googleapis/calendar";
+import { OAuth2Client } from "google-auth-library";
 
 const SCOPES = [
   "openid",
@@ -14,7 +15,7 @@ export function getOAuthClient() {
   if (!id || !secret) {
     throw new Error("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET");
   }
-  return new google.auth.OAuth2(id, secret, redirect);
+  return new OAuth2Client(id, secret, redirect);
 }
 
 export function publicBaseUrl() {
@@ -46,8 +47,22 @@ export async function exchangeCodeForTokens(code: string) {
   return { oauth2, tokens };
 }
 
+export async function fetchGoogleUserProfile(oauth2: OAuth2Client) {
+  const { token } = await oauth2.getAccessToken();
+  if (!token) {
+    throw new Error("No access token from Google OAuth.");
+  }
+  const res = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Google userinfo failed: ${res.status}`);
+  }
+  return (await res.json()) as { email?: string; id?: string };
+}
+
 export function getCalendarClient(refreshToken: string) {
   const oauth2 = getOAuthClient();
   oauth2.setCredentials({ refresh_token: refreshToken });
-  return google.calendar({ version: "v3", auth: oauth2 });
+  return calendar({ version: "v3", auth: oauth2 });
 }

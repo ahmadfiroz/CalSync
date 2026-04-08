@@ -1,12 +1,15 @@
 import type { SyncResult } from "./sync";
 import { runMirrorSync } from "./sync";
 import { buildClientMapForCalendars } from "./accounts";
-import { readStore, isStoreConnected } from "./store";
+import { isStoreConnected } from "./store";
+import { readStoreForUser } from "./store-db";
 
-let syncInFlight: Promise<SyncResult | null> | null = null;
+const syncInFlight = new Map<string, Promise<SyncResult | null>>();
 
-export async function performFullSync(): Promise<SyncResult | null> {
-  const s = readStore();
+export async function performFullSyncForUser(
+  userId: string
+): Promise<SyncResult | null> {
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) return null;
   const ids = s.syncCalendarIds ?? [];
   if (ids.length < 2) return null;
@@ -32,11 +35,15 @@ export async function performFullSync(): Promise<SyncResult | null> {
   return runMirrorSync(clientFor, ids, labels);
 }
 
-/** Single-flight: concurrent triggers coalesce to one run. */
-export function performFullSyncCoalesced(): Promise<SyncResult | null> {
-  if (syncInFlight) return syncInFlight;
-  syncInFlight = performFullSync().finally(() => {
-    syncInFlight = null;
+/** Single-flight per user: concurrent triggers coalesce to one run. */
+export function performFullSyncCoalescedForUser(
+  userId: string
+): Promise<SyncResult | null> {
+  const existing = syncInFlight.get(userId);
+  if (existing) return existing;
+  const p = performFullSyncForUser(userId).finally(() => {
+    syncInFlight.delete(userId);
   });
-  return syncInFlight;
+  syncInFlight.set(userId, p);
+  return p;
 }

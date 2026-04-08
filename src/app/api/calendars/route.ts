@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readStore, isStoreConnected } from "@/lib/store";
+import { isStoreConnected } from "@/lib/store";
+import { readStoreForUser } from "@/lib/store-db";
 import { getCalendarClient } from "@/lib/google";
 import { listCalendarsMerged } from "@/lib/calendar-directory";
+import { requireUserId } from "@/lib/api-session";
 
 export const runtime = "nodejs";
 
 export type { ListedCal } from "@/lib/calendar-directory";
 
 export async function GET() {
-  const items = await listCalendarsMerged(readStore());
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
+  const items = await listCalendarsMerged(s);
   if (!items) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
@@ -16,7 +23,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const s = readStore();
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }

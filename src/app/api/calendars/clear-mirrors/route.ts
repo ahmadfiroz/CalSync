@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readStore, isStoreConnected } from "@/lib/store";
+import { isStoreConnected } from "@/lib/store";
+import { readStoreForUser } from "@/lib/store-db";
 import {
   listAllowedCalendarIds,
   resolveClientForCalendar,
 } from "@/lib/accounts";
 import { clearMirrorsOnCalendar } from "@/lib/sync";
+import { requireUserId } from "@/lib/api-session";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const s = readStore();
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }

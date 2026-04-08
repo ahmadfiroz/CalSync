@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { calendar_v3 } from "googleapis";
+import type { calendar_v3 } from "@googleapis/calendar";
 import type { CalendarWatchChannel, ConnectedAccount } from "./store";
 import { getCalendarClient, publicBaseUrl } from "./google";
 import { resolveClientForCalendar } from "./accounts";

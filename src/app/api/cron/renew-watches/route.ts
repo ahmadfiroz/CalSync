@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readStore, writeStore, isStoreConnected } from "@/lib/store";
+import { readStoreForUser, writeStoreForUser, listUserIds } from "@/lib/store-db";
+import { isStoreConnected } from "@/lib/store";
 import {
   calendarPushAvailable,
   renewExpiringWatches,
@@ -22,30 +23,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: "no_https_public_url" });
   }
 
-  const s = readStore();
-  if (!isStoreConnected(s)) {
-    return NextResponse.json({ ok: true, skipped: "not_connected" });
+  const userIds = await listUserIds();
+  let renewedAny = false;
+
+  for (const userId of userIds) {
+    const s = await readStoreForUser(userId);
+    if (!isStoreConnected(s)) continue;
+
+    const ids = s.syncCalendarIds ?? [];
+    if (ids.length < 2) continue;
+
+    const next = await renewExpiringWatches(
+      s.accounts,
+      ids,
+      s.calendarWatchChannels
+    );
+
+    if (next === null) continue;
+
+    await writeStoreForUser(userId, {
+      ...s,
+      calendarWatchChannels: next.length ? next : undefined,
+    });
+    renewedAny = true;
   }
 
-  const ids = s.syncCalendarIds ?? [];
-  if (ids.length < 2) {
-    return NextResponse.json({ ok: true, skipped: "need_two_calendars" });
-  }
-
-  const next = await renewExpiringWatches(
-    s.accounts,
-    ids,
-    s.calendarWatchChannels
-  );
-
-  if (next === null) {
-    return NextResponse.json({ ok: true, renewed: false });
-  }
-
-  writeStore({
-    ...s,
-    calendarWatchChannels: next.length ? next : undefined,
+  return NextResponse.json({
+    ok: true,
+    renewed: renewedAny,
+    usersChecked: userIds.length,
   });
-
-  return NextResponse.json({ ok: true, renewed: true });
 }

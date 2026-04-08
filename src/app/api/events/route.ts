@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { calendar_v3 } from "googleapis";
-import { readStore, isStoreConnected } from "@/lib/store";
+import type { calendar_v3 } from "@googleapis/calendar";
+import { isStoreConnected } from "@/lib/store";
+import { readStoreForUser } from "@/lib/store-db";
 import { resolveClientForCalendar } from "@/lib/accounts";
 import { CALSYNC_SOURCE_KEY } from "@/lib/constants";
 import { isEventDeclinedBySelf, listAllEvents } from "@/lib/sync";
 import { listCalendarsMerged } from "@/lib/calendar-directory";
+import { requireUserId } from "@/lib/api-session";
 
 export const runtime = "nodejs";
 
@@ -37,7 +39,11 @@ function rowStartMs(
 }
 
 export async function GET(req: NextRequest) {
-  const s = readStore();
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
