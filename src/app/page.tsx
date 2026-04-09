@@ -1679,42 +1679,73 @@ export default function Home() {
                         (a) => a.id === draftRule.sourceAccountId
                       )?.email ?? draftRule.sourceAccountId}
                     </p>
-                    <ul className="space-y-2">
-                      {calendars
-                        .filter(
-                          (c) =>
-                            c.accountId === draftRule.sourceAccountId &&
-                            c.summary !== "CalSync"
-                        )
-                        .map((c) => (
-                          <li key={c.id}>
-                            <label className="flex cursor-pointer items-center gap-3">
-                              <input
-                                type="checkbox"
-                                checked={
-                                  draftRule.sourceCals?.has(c.id) ?? false
-                                }
-                                onChange={() =>
-                                  setDraftRule((r) => {
-                                    const s = new Set(r?.sourceCals ?? []);
-                                    if (s.has(c.id)) s.delete(c.id);
-                                    else s.add(c.id);
-                                    return { ...r, sourceCals: s };
-                                  })
-                                }
-                              />
-                              <span className="text-sm text-zinc-100">
-                                {c.summary}
-                              </span>
-                              {c.primary ? (
-                                <span className="text-xs text-amber-400/90">
-                                  primary
-                                </span>
-                              ) : null}
-                            </label>
-                          </li>
-                        ))}
-                    </ul>
+                    {(() => {
+                      const sourceCals = calendars.filter(
+                        (c) =>
+                          c.accountId === draftRule.sourceAccountId &&
+                          c.summary !== "CalSync"
+                      );
+                      const allIds = sourceCals.map((c) => c.id);
+                      const checkedCount = allIds.filter(
+                        (id) => draftRule.sourceCals?.has(id)
+                      ).length;
+                      const allChecked = checkedCount === allIds.length && allIds.length > 0;
+                      const someChecked = checkedCount > 0 && !allChecked;
+                      return (
+                        <>
+                          <label className="flex cursor-pointer items-center gap-3 border-b border-zinc-800 pb-2">
+                            <input
+                              type="checkbox"
+                              checked={allChecked}
+                              ref={(el) => {
+                                if (el) el.indeterminate = someChecked;
+                              }}
+                              onChange={() =>
+                                setDraftRule((r) => ({
+                                  ...r,
+                                  sourceCals: allChecked
+                                    ? new Set()
+                                    : new Set(allIds),
+                                }))
+                              }
+                            />
+                            <span className="text-xs font-medium text-zinc-400">
+                              Select all
+                            </span>
+                          </label>
+                          <ul className="space-y-2">
+                            {sourceCals.map((c) => (
+                              <li key={c.id}>
+                                <label className="flex cursor-pointer items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      draftRule.sourceCals?.has(c.id) ?? false
+                                    }
+                                    onChange={() =>
+                                      setDraftRule((r) => {
+                                        const s = new Set(r?.sourceCals ?? []);
+                                        if (s.has(c.id)) s.delete(c.id);
+                                        else s.add(c.id);
+                                        return { ...r, sourceCals: s };
+                                      })
+                                    }
+                                  />
+                                  <span className="text-sm text-zinc-100">
+                                    {c.summary}
+                                  </span>
+                                  {c.primary ? (
+                                    <span className="text-xs text-amber-400/90">
+                                      primary
+                                    </span>
+                                  ) : null}
+                                </label>
+                              </li>
+                            ))}
+                          </ul>
+                        </>
+                      );
+                    })()}
                     <div className="flex gap-2 pt-1">
                       <button
                         type="button"
