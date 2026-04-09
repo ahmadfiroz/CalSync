@@ -1,8 +1,8 @@
 # CalSync
 
-Self-hosted helper for Google Calendar: when you are busy on one calendar, CalSync mirrors **Busy** blocks onto the others in your sync group. OAuth refresh tokens and preferences are stored per user in **Supabase** (Postgres). The app is **multi-user**: each Google sign-in gets an isolated CalSync account unless that Google identity was already linked (including via “Add another Google account”).
+Self-hosted Google Calendar helper that mirrors **Busy** blocks across accounts using explicit **mirror rules**. Each rule directs busy events from one or more source calendars (on any connected Google account) into a destination calendar on a different account — so the destination account always shows when you are busy, without exposing event details. OAuth refresh tokens and mirror rules are stored per user in **Supabase** (Postgres). The app is **multi-user**: each Google sign-in gets an isolated CalSync account unless that Google identity was already linked (including via “Add another Google account”).
 
-**Latest release:** v0.3.0 (2026-04-09). See [Changelog](#changelog).
+**Latest release:** v0.3.1 (2026-04-09). See [Changelog](#changelog).
 
 Copy **`.env.example`** to **`.env.local`** and follow [Step-by-step setup](#step-by-step-setup), then [Run CalSync](#run-calsync). For a public HTTPS deployment, see [Recommended server configuration](#recommended-server-configuration).
 
@@ -49,7 +49,7 @@ npm install
 ### 4. Create Supabase tables
 
 1. In the Supabase dashboard, open **SQL Editor** and run the migration script from this repo: [`supabase/migrations/20260409120000_calsync_multiuser.sql`](supabase/migrations/20260409120000_calsync_multiuser.sql) (creates `calsync_users`, `calsync_identities`, `calsync_stores`, `calsync_watch_channels` with RLS enabled and no public policies — the app uses the **service role** from the server only).
-2. Under **Project Settings → API**, copy the **Project URL** and the **service_role** key (keep the service role secret).
+2. Under **Project Settings → API**, copy the **Project URL** and the **Secret key** (under "Secret keys" — click the eye icon to reveal it; starts with `sb_secret_`). If your Supabase dashboard still shows legacy keys, use the **service_role** key from the "Legacy anon, service_role API keys" tab instead.
 
 ### 5. Configure environment variables
 
@@ -187,14 +187,15 @@ Install Node via your distro or **nvm** so `npm` and `node` are on `PATH` for th
 After you sign in, the dashboard uses two tabs:
 
 - **Upcoming events** (default) — Lists events in the next 7, 30, or 90 days for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/video links, and a link to open the event in Google Calendar. Use **Declined events** to show or hide invitations you declined (hidden by default; shown rows are muted with a **Declined** badge). The list uses a short loading skeleton, refreshes in the background about every minute while the tab is visible, and reloads after sync and clear-mirrors actions.
-- **Sync setup** — Manage Google accounts and the sync group:
-  - **Connected Google accounts** — Add another account, remove one, or **Disconnect all**. Calendars from every linked account appear under that account’s email; busy blocks can sync across different Google logins.
-  - **Calendars in sync group** — Check at least two calendars that should both publish and receive busy mirrors. The list is grouped by account, with the **primary** calendar first in each group; only calendar display names are shown (not raw calendar IDs). Each calendar must be writable (owner or “Make changes to events”) on at least one connected account. Use **Add calendar** to **Create** a new calendar (optionally choose which account owns it when you have several) or **Add to list** with an existing calendar ID from Google Calendar → Settings → Integrate calendar. Then **Save selection** and **Run sync now**, or rely on HTTPS push notifications and optional polling (see [Configure environment variables](#5-configure-environment-variables)).
-  - After a sync, **Last sync** shows created/updated/deleted mirror counts, how many event rows Google returned, and (when relevant) why some events were skipped (e.g. “Show as available”, existing CalSync mirrors, cancelled events).
+- **Sync setup** — Manage Google accounts and mirror rules:
+  - **Connected Google accounts** — Add another account, remove one, or **Disconnect all**. Calendars from every linked account are available for use in mirror rules.
+  - **Mirror rules** — Each rule defines a directed sync: pick a **source account** and one or more **source calendars** to read busy blocks from, then pick a **destination account** and **destination calendar** to write the mirrors into. Source and destination must be different Google accounts. Set the destination calendar to **”Auto (CalSync calendar)”** to let CalSync find or create a calendar named “CalSync” on the destination account automatically. You can have multiple rules — for example, mirror your work calendar into your personal account and vice versa.
+  - **Save rules** persists the configuration and registers Google Calendar push notifications if HTTPS is available. **Run sync now** triggers an immediate sync.
+  - After a sync, **Last sync** shows created/updated/deleted mirror counts, how many event rows Google returned, and (when relevant) why some events were skipped (e.g. “Show as available”, existing CalSync mirrors, cancelled events, declined invitations).
 
 Refresh tokens and preferences live in your **Supabase** project. Back up and secure that database; the app does not persist tokens on local disk except during a one-time legacy import from `.data/store.json`.
 
-**API (optional):** Authenticated sessions can call `GET /api/events?days=30` (1–90) for JSON of the same upcoming-events window used by the dashboard. Each event object includes `declinedBySelf` when your RSVP on that event is *Declined*. You can trigger a sync with `POST /api/sync` (same session cookie) or from automation if you expose it appropriately. To strip only CalSync mirror blocks from one calendar (not your real events), `POST /api/calendars/clear-mirrors` with JSON `{ "calendarId": "<id>" }`.
+**API (optional):** Authenticated sessions can call `GET /api/events?days=30` (1–90) for JSON of the upcoming-events window used by the dashboard (source calendars from all mirror rules). Each event includes `declinedBySelf` when your RSVP is *Declined*. Trigger a sync with `POST /api/sync`. Retrieve or update mirror rules with `GET /api/config` and `PUT /api/config` (body: `{ "mirrorRules": [...] }`). To strip CalSync mirror blocks from a single calendar, `POST /api/calendars/clear-mirrors` with `{ "calendarId": "<id>" }`.
 
 ## Scripts
 
@@ -208,6 +209,14 @@ Refresh tokens and preferences live in your **Supabase** project. Back up and se
 | `npm run lint` | ESLint |
 
 ## Changelog
+
+### [0.3.1] — 2026-04-09
+
+- **Directed mirror rules:** Replaced the flat N×N "sync group" model with explicit `MirrorRule` objects. Each rule specifies a source account, one or more source calendars, a destination account, and a destination calendar (`__auto__` to find/create a "CalSync" calendar automatically). Rules are validated on save (non-empty source calendars, source ≠ destination account, both accounts must be connected).
+- **Sync engine rewrite:** `runDirectedMirrorSync` replaces the old N×N fan-out. Uses direct per-account API clients instead of probing all accounts per calendar. Calendar labels fetched in parallel with `Promise.allSettled`.
+- **Auto-calendar persistence:** Resolved `__auto__` destination calendar IDs are written back to the store so repeated syncs skip the `calendarList` + `calendar.insert` round-trip.
+- **Push notification fix:** Watch channels now register for any rule with at least one source calendar (was previously skipped when fewer than two calendars were watched).
+- **API:** `GET /api/config` returns `mirrorRules`; `PUT /api/config` accepts and validates the new rule format.
 
 ### [0.3.0] — 2026-04-09
 
@@ -225,7 +234,7 @@ Refresh tokens and preferences live in your **Supabase** project. Back up and se
 
 ### [0.1.0] — 2026-04-03
 
-- **Core:** Next.js 16 (App Router), Google OAuth, busy-block mirroring across a chosen calendar group, local persistence in `.data/store.json`, optional push notifications and cron for watch renewal (see env docs).
+- **Core:** Next.js 16 (App Router), Google OAuth, busy-block mirroring, local persistence in `.data/store.json` (superseded by Supabase in v0.3.0), optional push notifications and cron for watch renewal (see env docs).
 - **Dashboard:** **Upcoming events** and **Sync setup** tabs; calendars merged across linked Google accounts; last-sync summary with skip reasons.
 - **API:** `GET /api/events?days=…` (1–90), `POST /api/sync`, `POST /api/calendars/clear-mirrors` (session-authenticated).
 - **Tooling:** `npm run dev` / `npm run build` (Turbopack); optional `npm run dev:webpack` and `npm run build:webpack`.
