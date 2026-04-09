@@ -1,16 +1,14 @@
 # CalSync
 
-Self-hosted helper for Google Calendar: when you are busy on one calendar, CalSync mirrors **Busy** blocks onto the others in your sync group. OAuth refresh tokens and preferences are stored per user in **Supabase** (Postgres). The app is **multi-user**: each Google sign-in gets an isolated CalSync account unless that Google identity was already linked (including via “Add another Google account”).
+Self-hosted helper for Google Calendar: when you are busy on one calendar, CalSync mirrors **Busy** blocks onto the others in your sync group. OAuth refresh tokens and preferences are stored per user in **Supabase** (Postgres). The app is **multi-user**—each Google sign-in gets an isolated account unless that identity was already linked (including via “Add another Google account”).
 
-**Latest release:** v0.3.2 (2026-04-09). See [Changelog](#changelog) and [`CHANGELOG.md`](CHANGELOG.md).
-
-Copy **`.env.example`** to **`.env.local`** and follow [Step-by-step setup](#step-by-step-setup), then [Run CalSync](#run-calsync). For a public HTTPS deployment, see [Recommended server configuration](#recommended-server-configuration).
+**Version:** see `package.json`. **Release history:** [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) 20 or newer (LTS recommended)
-- A [Google Cloud](https://console.cloud.google.com/) project where you can enable APIs and create OAuth credentials
-- A [Supabase](https://supabase.com/) project (free tier is fine) for the database
+- A [Google Cloud](https://console.cloud.google.com/) project (Calendar API + OAuth web client)
+- A [Supabase](https://supabase.com/) project for the database
 
 ## Step-by-step setup
 
@@ -21,11 +19,9 @@ git clone https://github.com/srizon/CalSync.git calsync
 cd calsync
 ```
 
-(Use your fork or mirror URL if different; the final argument sets the folder name.)
+Use your fork or mirror URL if different; the last argument is the folder name.
 
 ### 2. Install dependencies
-
-From the project root:
 
 ```bash
 npm install
@@ -33,129 +29,96 @@ npm install
 
 ### 3. Create Google OAuth credentials
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), select or create a project.
+1. In Google Cloud Console, select or create a project.
 2. **APIs & Services → Library** — enable **Google Calendar API**.
-3. **APIs & Services → OAuth consent screen** — configure the app (type *External* is fine for personal use; add your Google account as a test user if the app stays in testing).
-4. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
-5. Application type: **Web application**.
-6. Under **Authorized redirect URIs**, add exactly:
+3. **APIs & Services → OAuth consent screen** — configure the app (*External* is fine for personal use; add test users while in testing).
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID** — type **Web application**.
+5. **Authorized redirect URIs** — add your callback URLs (same path for every origin):
 
-   `http://localhost:3000/api/auth/callback`
+   - Local: `http://localhost:3000/api/auth/callback` (adjust host/port if you change the dev server; set `CALSYNC_PUBLIC_URL` to match.)
+   - Production: `https://your-domain.com/api/auth/callback`
 
-   For production, add your public URL with the same path, e.g. `https://your-domain.com/api/auth/callback`.
-
-7. Copy the **Client ID** and **Client secret**.
+6. Copy the **Client ID** and **Client secret**.
 
 ### 4. Create Supabase tables
 
-1. In the Supabase dashboard, open **SQL Editor** and run the migration script from this repo: [`supabase/migrations/20260409120000_calsync_multiuser.sql`](supabase/migrations/20260409120000_calsync_multiuser.sql) (creates `calsync_users`, `calsync_identities`, `calsync_stores`, `calsync_watch_channels` with RLS enabled and no public policies — the app uses the **service role** from the server only).
-2. Under **Project Settings → API**, copy the **Project URL** and the **service_role** key (keep the service role secret).
+1. In the Supabase **SQL Editor**, run [`supabase/migrations/20260409120000_calsync_multiuser.sql`](supabase/migrations/20260409120000_calsync_multiuser.sql). This creates `calsync_users`, `calsync_identities`, `calsync_stores`, and `calsync_watch_channels` with RLS and no public policies—the app uses the **service role** on the server only.
+2. Under **Project Settings → API**, copy the **Project URL** and the **service_role** key (keep it secret).
 
 ### 5. Configure environment variables
 
-The repository includes **`.env.example`** as a safe template (no secrets). Copy it and fill in your values:
+```bash
+cp .env.example .env.local
+```
 
-1. Copy the example env file:
+Edit `.env.local` using the reference table below and the comments in `.env.example`. Optional settings (webhook token, auto-sync interval, cron secret) are documented there.
 
-   ```bash
-   cp .env.example .env.local
-   ```
+**Legacy import:** If you are upgrading from a build that used `.data/store.json`, leave that file in place on first start. When the Supabase database has no users yet, the app imports it for a single user and renames the file to `store.json.migrated`.
 
-2. Edit `.env.local` and set at minimum:
+## Environment variables
 
-   | Variable | Description |
-   |----------|-------------|
-   | `GOOGLE_CLIENT_ID` | OAuth client ID from step 3 |
-   | `GOOGLE_CLIENT_SECRET` | OAuth client secret from step 3 |
-   | `SUPABASE_URL` | Supabase project URL (step 4) |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server only; step 4) |
-   | `CALSYNC_PUBLIC_URL` | Base URL with no trailing slash. Local: `http://localhost:3000`. Production: your HTTPS origin |
+| Variable | When | Description |
+|----------|------|-------------|
+| `GOOGLE_CLIENT_ID` | Always | OAuth client ID from Google Cloud |
+| `GOOGLE_CLIENT_SECRET` | Always | OAuth client secret |
+| `SUPABASE_URL` | Always | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Always | Service role key (server only; never expose to the browser) |
+| `CALSYNC_PUBLIC_URL` | Always | Public base URL with **no** trailing slash (`http://localhost:3000` locally; HTTPS origin in production). Must match what users and OAuth use. |
+| `CALSYNC_SESSION_SECRET` | Production | Long random string; signs the dashboard session cookie |
+| `CALSYNC_ALLOWED_EMAILS` | Optional | Comma-separated Google emails allowed to sign in (useful on the public internet) |
+| `CALSYNC_WEBHOOK_TOKEN` | Optional | If set, Google push requests must send the same value in `X-Goog-Channel-Token` |
+| `CALSYNC_CRON_SECRET` | Optional | Protects `GET /api/cron/renew-watches` with `Authorization: Bearer <secret>` |
+| `CALSYNC_AUTO_SYNC_INTERVAL_SEC` | Optional | Poll sync every *N* seconds while the process runs (e.g. `120`), in addition to push |
 
-3. **Production:** set `CALSYNC_SESSION_SECRET` to a long random string so dashboard sessions are signed securely. Optionally set `CALSYNC_ALLOWED_EMAILS` to a comma-separated list of Google emails allowed to sign in.
-
-**Migrating from older CalSync** that used `.data/store.json`: leave that file in place on first start after upgrading. If the Supabase database has no users yet, the app **imports** the legacy file into a single CalSync user and renames the file to `store.json.migrated`.
-
-See comments in `.env.example` for optional settings (webhook token, auto-sync interval, cron secret for renewing push subscriptions).
+Google Calendar **push** needs a public **HTTPS** URL. Without it, push-related behavior is skipped (the cron route may report `no_https_public_url`).
 
 ## Run CalSync
 
-### Run in development
-
-From the project root (with `.env.local` filled in):
+### Development
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). You will be redirected to sign in; use **Continue with Google**, then connect calendars on the dashboard.
+Open [http://localhost:3000](http://localhost:3000), sign in with Google, then configure calendars on the dashboard.
 
-The dev server uses the default Next.js port **3000**. To use another port:
+Default port is **3000**. For another port:
 
 ```bash
 npx next dev -p 3001
 ```
 
-Set `CALSYNC_PUBLIC_URL` to match (e.g. `http://localhost:3001`).
+Set `CALSYNC_PUBLIC_URL` accordingly (e.g. `http://localhost:3001`).
 
-### Run in production (same machine or server)
-
-Build once, then start the Node server:
+### Production
 
 ```bash
 npm run build
 npm run start
 ```
 
-By default the app listens on **port 3000**. Set the `PORT` environment variable to listen on another port (for example `PORT=8080 npm run start`).
-
-Ensure `CALSYNC_PUBLIC_URL` matches the URL users and Google OAuth actually use (HTTPS in production). Google Calendar **push** notifications require an HTTPS public URL; without HTTPS, push-related features are skipped (the cron route returns `no_https_public_url` when push is unavailable).
+Default listen port is **3000**; override with `PORT` (e.g. `PORT=8080 npm run start`). Ensure `CALSYNC_PUBLIC_URL` matches the URL users and Google OAuth use (HTTPS in production).
 
 ## Recommended server configuration
 
-Use these guidelines when CalSync runs on a VPS, homelab host, or similar always-on environment.
+For a VPS, homelab host, or similar always-on deployment:
 
-**Compute and Node**
+**Compute:** Node.js 20 LTS or newer. CalSync is mostly I/O to Google; a small VM (about **1 vCPU**, **512 MB–1 GB** RAM) is often enough.
 
-- **Node.js** 20 LTS or newer on the server.
-- **Sizing:** CalSync is mostly I/O to Google’s APIs. A small VM (about **1 vCPU**, **512 MB–1 GB RAM**) is often enough; add headroom if you run other services on the same host.
+**Data:** Supabase holds tokens, sync selection, and push metadata—use backups and the same `SUPABASE_*` values in production. After a successful legacy migration, `.data/` is optional; `.data/store.json` is only read once then renamed.
 
-**Storage**
+**HTTPS and reverse proxy:** Terminate TLS at **Caddy**, **nginx**, **Traefik**, or your platform LB; proxy to `http://127.0.0.1:<PORT>` (match `PORT` for `npm run start`). Forward **`Host`**, **`X-Forwarded-Proto`**, and **`X-Forwarded-For`** so redirects align with `CALSYNC_PUBLIC_URL`.
 
-- **Supabase** holds all user data (tokens, sync selection, push channel metadata). Use Supabase backups and point `SUPABASE_*` at the same project for production. Legacy **`.data/store.json`** is only read once for automatic import, then renamed; you can remove `.data/` after a successful migration.
-
-**HTTPS and reverse proxy**
-
-- Terminate **TLS** at a reverse proxy (e.g. **Caddy**, **nginx**, or **Traefik**) or your platform’s load balancer, and proxy to the Next.js process.
-- **Proxy target:** `http://127.0.0.1:<PORT>` where `<PORT>` matches `PORT` for `npm run start` (default 3000). Binding only to localhost is fine when the proxy is on the same machine.
-- Forward **`Host`**, **`X-Forwarded-Proto`**, and **`X-Forwarded-For`** so redirects and OAuth stay aligned with `CALSYNC_PUBLIC_URL`.
-
-**Production environment variables**
-
-| Priority | Variable | Notes |
-|----------|----------|--------|
-| Required | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | From Google Cloud OAuth client (Web application). |
-| Required | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | From Supabase **Project Settings → API**; service role is server-only (never expose in the browser). |
-| Required | `CALSYNC_PUBLIC_URL` | Public HTTPS origin, **no trailing slash** (must match what users open in the browser). |
-| Required | `CALSYNC_SESSION_SECRET` | Long random string; signs the dashboard session cookie. |
-| Recommended | `CALSYNC_ALLOWED_EMAILS` | Comma-separated Google accounts allowed to sign in (useful on the public internet). |
-| Recommended | `CALSYNC_WEBHOOK_TOKEN` | If set, Google Calendar push requests must send the same value in `X-Goog-Channel-Token`. |
-| Recommended | `CALSYNC_CRON_SECRET` | Protects `GET /api/cron/renew-watches` with `Authorization: Bearer <secret>`. |
-| Optional | `CALSYNC_AUTO_SYNC_INTERVAL_SEC` | Poll sync every *N* seconds while the Node process runs (e.g. `120`) as a complement to push. |
-
-**Cron for push channel renewal**
-
-Google push channels expire after roughly a week. Schedule a **daily** HTTPS request (same host as `CALSYNC_PUBLIC_URL`):
+**Cron (push renewal):** Channels expire about weekly. Schedule a daily HTTPS request:
 
 ```bash
 curl -fsS -H "Authorization: Bearer YOUR_CALSYNC_CRON_SECRET" \
   "https://your-domain.com/api/cron/renew-watches"
 ```
 
-Set `CALSYNC_CRON_SECRET` in `.env.local` (or your process manager’s environment) to match `YOUR_CALSYNC_CRON_SECRET`.
+Set `CALSYNC_CRON_SECRET` to match. Environment variables are summarized in [Environment variables](#environment-variables).
 
-**Process supervision**
-
-Run `npm run start` under a supervisor so it restarts after reboots or crashes—for example **systemd**, **PM2**, or your platform’s native service model. Example **systemd** unit (adjust paths and user):
+**Process supervision:** Run `npm run start` under **systemd**, **PM2**, or equivalent. Example **systemd** unit (adjust paths and user):
 
 ```ini
 [Unit]
@@ -176,78 +139,27 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
-Install Node via your distro or **nvm** so `npm` and `node` are on `PATH` for the service user, or set `ExecStart` to the full path of `next` / `node` as needed.
-
-**Google Cloud Console**
-
-- Add the production **Authorized redirect URI**: `https://your-domain.com/api/auth/callback` (same path pattern as local, HTTPS origin only).
+Ensure `node`/`npm` are on `PATH` for the service user, or use full paths in `ExecStart`.
 
 ## Using the dashboard
 
-After you sign in, the dashboard uses two tabs:
+- **Upcoming events** — Next 7, 30, or 90 days for calendars in your **saved** sync group. Shows schedule, free transparency, optional Meet links, and a link to Google Calendar. Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
+- **Sync setup** — **Connected Google accounts** (add/remove, disconnect all). **Calendars in sync group** — choose at least two writable calendars; grouped by account with the **primary** calendar first. **Add calendar** creates a new calendar or adds by ID. **Save selection**, then **Run sync now**, or rely on push and optional polling (`CALSYNC_AUTO_SYNC_INTERVAL_SEC`). **Last sync** shows mirror counts and skip reasons.
 
-- **Upcoming events** (default) — Lists events in the next 7, 30, or 90 days for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/video links, and a link to open the event in Google Calendar. Overlapping busy intervals show a **Conflict** badge (declined RSVPs are excluded from conflict detection). Use **Declined events** to show or hide invitations you declined (hidden by default; shown rows are muted with a **Declined** badge). The list uses a short loading skeleton, refreshes in the background about every minute while the tab is visible, and reloads after sync and clear-mirrors actions.
-- **Sync setup** — Manage Google accounts and the sync group:
-  - **Connected Google accounts** — Add another account, remove one, or **Disconnect all**. Calendars from every linked account appear under that account’s email; busy blocks can sync across different Google logins.
-  - **Calendars in sync group** — Check at least two calendars that should both publish and receive busy mirrors. The list is grouped by account, with the **primary** calendar first in each group; only calendar display names are shown (not raw calendar IDs). Each calendar must be writable (owner or “Make changes to events”) on at least one connected account. Use **Add calendar** to **Create** a new calendar (optionally choose which account owns it when you have several) or **Add to list** with an existing calendar ID from Google Calendar → Settings → Integrate calendar. Then **Save selection** and **Run sync now**, or rely on HTTPS push notifications and optional polling (see [Configure environment variables](#5-configure-environment-variables)).
-  - After a sync, **Last sync** shows created/updated/deleted mirror counts, how many event rows Google returned, and (when relevant) why some events were skipped (e.g. “Show as available”, existing CalSync mirrors, cancelled events).
+Tokens and preferences live in **Supabase**; secure and back up that database.
 
-Refresh tokens and preferences live in your **Supabase** project. Back up and secure that database; the app does not persist tokens on local disk except during a one-time legacy import from `.data/store.json`.
-
-**API (optional):** Authenticated sessions can call `GET /api/events?days=30` (1–90) for JSON of the same upcoming-events window used by the dashboard. Each event object includes `declinedBySelf` when your RSVP on that event is *Declined*. You can trigger a sync with `POST /api/sync` (same session cookie) or from automation if you expose it appropriately. To strip only CalSync mirror blocks from one calendar (not your real events), `POST /api/calendars/clear-mirrors` with JSON `{ "calendarId": "<id>" }`.
+**API (session-authenticated):** `GET /api/events?days=30` (1–90), `POST /api/sync`, `POST /api/calendars/clear-mirrors` with `{ "calendarId": "<id>" }`. Event objects can include `declinedBySelf`.
 
 ## Scripts
 
 | Command | Purpose |
 |---------|---------|
-| `npm run dev` | Development server (Turbopack) |
-| `npm run dev:webpack` | Development server using Webpack |
-| `npm run build` | Production build (Turbopack) |
-| `npm run build:webpack` | Production build using Webpack |
-| `npm run start` | Run production server |
+| `npm run dev` | Development server |
+| `npm run dev:webpack` | Development server (Webpack) |
+| `npm run build` | Production build |
+| `npm run build:webpack` | Production build (Webpack) |
+| `npm run start` | Production server |
 | `npm run lint` | ESLint |
-
-## Changelog
-
-### [0.3.2] — 2026-04-09
-
-- **Agenda:** **Conflict** badge when another visible (non-ended) event overlaps in time (timed or all-day); overlaps involving a self-declined RSVP are ignored.
-- **Login errors:** Friendly multi-line messages for common OAuth `?error=` codes (`invalid_state`, `access_denied`, `unauthorized_client`, `invalid_grant`, missing Google client env) on the login page and the dashboard.
-- **Meeting links:** Video icon, shorter labels on small screens, full labels from `sm` up, improved `aria-label`s; primary vs outline styling by list position.
-- **Copy & layout:** Clearer wording that tokens and preferences live in the **instance database** (not only your device), plus an experimental-use disclaimer; tighter mobile spacing; error alerts support multi-line text.
-
-### [0.3.1] — 2026-04-09
-
-- **API robustness:** `GET /api/calendars` and `GET /api/events` return JSON error bodies when Google Calendar calls fail; the dashboard parses responses safely so empty or non-JSON replies show a clear message.
-- **Sync UX:** **Run sync** uses the **saved** sync group; the button stays disabled until at least two calendars are saved, with copy explaining draft vs saved selection. Save errors show API `message` when available.
-- **OAuth connect:** After linking a Google account, that account’s **primary** calendar id is appended to the stored sync group (within allowed calendars).
-
-### [0.3.0] — 2026-04-09
-
-- **Multi-user + Supabase:** Each distinct Google identity maps to a CalSync user (unless you use **Add another Google account** while signed in). Data lives in Supabase Postgres (`calsync_users`, `calsync_identities`, `calsync_stores`, `calsync_watch_channels`). Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. One-time import from legacy `.data/store.json` when the database is empty.
-- **Sessions:** Dashboard cookie now carries an internal `userId`; older email-only cookies still work until they expire if the identity exists in Supabase.
-- **Background jobs:** Auto-sync, watch renewal, cron, and calendar webhooks operate per user; push webhooks resolve the user via `x-goog-channel-id`.
-
-### [0.2.0] — 2026-04-08
-
-- **Documentation:** Step-by-step setup starts with **clone** instructions; **Run CalSync** covers dev (default port, `npx next dev -p …`) and production (`npm run build` / `npm run start`, `PORT`). New **Recommended server configuration** section: VM sizing, persisting **`.data/`**, reverse proxy headers (`Host`, `X-Forwarded-Proto`, `X-Forwarded-For`), production env variable table, daily **cron** example for `GET /api/cron/renew-watches`, example **systemd** unit, and production OAuth redirect URI. Cross-links use the updated “configure environment variables” step number.
-- **Events API:** `GET /api/events` returns declined invitations in the payload instead of omitting them; each row includes **`declinedBySelf`** so clients can filter or style them.
-- **Agenda UI:** **Declined events** toggle (default off) with muted row styling, **Declined** pill, and softer list-head and join-link treatment when shown; empty state when only declined rows exist while the toggle is off. **EventsAgendaSkeleton** while loading; **silent** refetch about every 60 seconds when the document is visible; shared **`loadEvents`** with abort on unmount; event list refresh after sync, clear mirrors, and related actions.
-- **Agenda layout:** Custom-styled time-range `<select>`; row borders and padding adjusted for the first agenda item.
-- **Sync setup UI:** **Calendars in sync group** are grouped under each Google account (email label). Within each account, the **primary** calendar is listed first, then other calendars by name. Raw calendar IDs are no longer shown in the list (display names and the **primary** badge only).
-
-### [0.1.0] — 2026-04-03
-
-- **Core:** Next.js 16 (App Router), Google OAuth, busy-block mirroring across a chosen calendar group, local persistence in `.data/store.json`, optional push notifications and cron for watch renewal (see env docs).
-- **Dashboard:** **Upcoming events** and **Sync setup** tabs; calendars merged across linked Google accounts; last-sync summary with skip reasons.
-- **API:** `GET /api/events?days=…` (1–90), `POST /api/sync`, `POST /api/calendars/clear-mirrors` (session-authenticated).
-- **Tooling:** `npm run dev` / `npm run build` (Turbopack); optional `npm run dev:webpack` and `npm run build:webpack`.
-- **Declined invitations:** Events where your RSVP is *Declined* are omitted from the upcoming list, are not sources for mirrors, and sync skip stats can include `declinedByYou`.
-- **Clear mirrors:** Per-calendar control on Sync setup (and the clear-mirrors API) deletes CalSync mirror events over a wide past range plus the normal forward window; your own non-mirror events are untouched.
-- **Sync cleanup:** Duplicate CalSync mirrors on the same target (same mirror key) are deleted during sync.
-- **UI:** Calendar create/add flows were removed from the home page in favor of managing the sync group and calendars in Google Calendar / settings.
-- **Agenda:** The upcoming-events list hides items that have already ended (timed and all-day); the view refreshes when the next event in range ends. List-head badges use urgency colors (calm → urgent) from time until start or, for live timed events, time until end. The footer shows how many events are still on the agenda versus how many in the window already ended, with a clear empty state when everything in range is past.
-- **Login:** OAuth error text from the query string is read with `useSearchParams` inside a `Suspense` boundary so static generation and ESLint stay clean.
 
 ## Tech stack
 
