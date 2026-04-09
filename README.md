@@ -2,7 +2,7 @@
 
 Self-hosted helper for Google Calendar: when you are busy on one calendar, CalSync mirrors **Busy** blocks onto the others in your sync group. OAuth refresh tokens and preferences are stored per user in **Supabase** (Postgres). The app is **multi-user**: each Google sign-in gets an isolated CalSync account unless that Google identity was already linked (including via “Add another Google account”).
 
-**Latest release:** v0.3.0 (2026-04-09). See [Changelog](#changelog).
+**Latest release:** v0.3.2 (2026-04-09). See [Changelog](#changelog) and [`CHANGELOG.md`](CHANGELOG.md).
 
 Copy **`.env.example`** to **`.env.local`** and follow [Step-by-step setup](#step-by-step-setup), then [Run CalSync](#run-calsync). For a public HTTPS deployment, see [Recommended server configuration](#recommended-server-configuration).
 
@@ -186,7 +186,7 @@ Install Node via your distro or **nvm** so `npm` and `node` are on `PATH` for th
 
 After you sign in, the dashboard uses two tabs:
 
-- **Upcoming events** (default) — Lists events in the next 7, 30, or 90 days for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/video links, and a link to open the event in Google Calendar. Use **Declined events** to show or hide invitations you declined (hidden by default; shown rows are muted with a **Declined** badge). The list uses a short loading skeleton, refreshes in the background about every minute while the tab is visible, and reloads after sync and clear-mirrors actions.
+- **Upcoming events** (default) — Lists events in the next 7, 30, or 90 days for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/video links, and a link to open the event in Google Calendar. Overlapping busy intervals show a **Conflict** badge (declined RSVPs are excluded from conflict detection). Use **Declined events** to show or hide invitations you declined (hidden by default; shown rows are muted with a **Declined** badge). The list uses a short loading skeleton, refreshes in the background about every minute while the tab is visible, and reloads after sync and clear-mirrors actions.
 - **Sync setup** — Manage Google accounts and the sync group:
   - **Connected Google accounts** — Add another account, remove one, or **Disconnect all**. Calendars from every linked account appear under that account’s email; busy blocks can sync across different Google logins.
   - **Calendars in sync group** — Check at least two calendars that should both publish and receive busy mirrors. The list is grouped by account, with the **primary** calendar first in each group; only calendar display names are shown (not raw calendar IDs). Each calendar must be writable (owner or “Make changes to events”) on at least one connected account. Use **Add calendar** to **Create** a new calendar (optionally choose which account owns it when you have several) or **Add to list** with an existing calendar ID from Google Calendar → Settings → Integrate calendar. Then **Save selection** and **Run sync now**, or rely on HTTPS push notifications and optional polling (see [Configure environment variables](#5-configure-environment-variables)).
@@ -208,6 +208,19 @@ Refresh tokens and preferences live in your **Supabase** project. Back up and se
 | `npm run lint` | ESLint |
 
 ## Changelog
+
+### [0.3.2] — 2026-04-09
+
+- **Agenda:** **Conflict** badge when another visible (non-ended) event overlaps in time (timed or all-day); overlaps involving a self-declined RSVP are ignored.
+- **Login errors:** Friendly multi-line messages for common OAuth `?error=` codes (`invalid_state`, `access_denied`, `unauthorized_client`, `invalid_grant`, missing Google client env) on the login page and the dashboard.
+- **Meeting links:** Video icon, shorter labels on small screens, full labels from `sm` up, improved `aria-label`s; primary vs outline styling by list position.
+- **Copy & layout:** Clearer wording that tokens and preferences live in the **instance database** (not only your device), plus an experimental-use disclaimer; tighter mobile spacing; error alerts support multi-line text.
+
+### [0.3.1] — 2026-04-09
+
+- **API robustness:** `GET /api/calendars` and `GET /api/events` return JSON error bodies when Google Calendar calls fail; the dashboard parses responses safely so empty or non-JSON replies show a clear message.
+- **Sync UX:** **Run sync** uses the **saved** sync group; the button stays disabled until at least two calendars are saved, with copy explaining draft vs saved selection. Save errors show API `message` when available.
+- **OAuth connect:** After linking a Google account, that account’s **primary** calendar id is appended to the stored sync group (within allowed calendars).
 
 ### [0.3.0] — 2026-04-09
 
