@@ -5,14 +5,25 @@ import {
   OAUTH_INTENT_COOKIE,
   OAUTH_STATE_COOKIE,
 } from "@/lib/constants";
-import { google } from "googleapis";
-import { exchangeCodeForTokens, publicBaseUrl } from "@/lib/google";
-import { readStore, writeStore } from "@/lib/store";
+import {
+  exchangeCodeForTokens,
+  fetchGoogleUserProfile,
+  publicBaseUrl,
+} from "@/lib/google";
+import { EMPTY_STORE, type CalSyncStore } from "@/lib/store";
+import {
+  createUser,
+  normalizeIdentityKey,
+  readStoreForUser,
+  resolveUserIdByIdentityKey,
+  writeStoreForUser,
+} from "@/lib/store-db";
 import {
   createSessionToken,
   isEmailAllowed,
   sessionCookieOptions,
   SESSION_COOKIE,
+  verifySessionToken,
 } from "@/lib/session";
 
 export const runtime = "nodejs";
@@ -25,6 +36,7 @@ export async function GET(req: NextRequest) {
 
   const jar = await cookies();
   const expected = jar.get(OAUTH_STATE_COOKIE)?.value;
+  const oauthIntent = jar.get(OAUTH_INTENT_COOKIE)?.value;
   jar.delete(OAUTH_STATE_COOKIE);
   jar.delete(OAUTH_INTENT_COOKIE);
 
@@ -45,8 +57,7 @@ export async function GET(req: NextRequest) {
     const { oauth2, tokens } = await exchangeCodeForTokens(code);
     const rt = tokens.refresh_token!;
     oauth2.setCredentials(tokens);
-    const oauth2Api = google.oauth2({ version: "v2", auth: oauth2 });
-    const { data: profile } = await oauth2Api.userinfo.get();
+    const profile = await fetchGoogleUserProfile(oauth2);
     const email =
       typeof profile.email === "string" ? profile.email : undefined;
 
@@ -62,18 +73,60 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const sessionSubject =
+    const identityKey =
       email?.trim() ||
       (typeof profile.id === "string" ? `google:${profile.id}` : "");
-    if (!sessionSubject) {
+    if (!identityKey) {
       throw new Error("Google did not return an email or account id.");
     }
 
-    const prev = readStore() ?? {
-      version: 3 as const,
-      accounts: [],
-      mirrorRules: [],
-    };
+    const normalizedLoginKey = normalizeIdentityKey(identityKey);
+
+    const sessionToken = jar.get(SESSION_COOKIE)?.value;
+    const sessionPayload = sessionToken
+      ? await verifySessionToken(sessionToken)
+      : null;
+
+    const isAddIntent = oauthIntent === "add";
+    let targetUserId: string;
+
+    if (isAddIntent) {
+      if (!sessionPayload?.userId) {
+        return NextResponse.redirect(
+          new URL(
+            "/login?error=" +
+              encodeURIComponent(
+                "Sign in before adding another Google account."
+              ),
+            base
+          )
+        );
+      }
+      const existingOwner = await resolveUserIdByIdentityKey(normalizedLoginKey);
+      if (existingOwner && existingOwner !== sessionPayload.userId) {
+        return NextResponse.redirect(
+          new URL(
+            "/login?error=" +
+              encodeURIComponent(
+                "This Google account is already linked to another CalSync user."
+              ),
+            base
+          )
+        );
+      }
+      targetUserId = sessionPayload.userId;
+    } else {
+      const existingOwner = await resolveUserIdByIdentityKey(normalizedLoginKey);
+      if (existingOwner) {
+        targetUserId = existingOwner;
+      } else {
+        targetUserId = await createUser();
+      }
+    }
+
+    const prev =
+      (await readStoreForUser(targetUserId)) ??
+      ({ ...EMPTY_STORE } satisfies CalSyncStore);
 
     const newAcc = { id: randomUUID(), refreshToken: rt, email };
 
@@ -83,16 +136,26 @@ export async function GET(req: NextRequest) {
     }
     accounts.push(newAcc);
 
-    writeStore({
-      version: 3,
-      accounts,
-      mirrorRules: prev.mirrorRules,
-      calendarWatchChannels: prev.calendarWatchChannels,
-    });
+    const extraIdentityKeys: string[] = [];
+    if (!email?.trim() && typeof profile.id === "string") {
+      extraIdentityKeys.push(`google:${profile.id}`);
+    }
 
+    await writeStoreForUser(
+      targetUserId,
+      {
+        version: 3,
+        accounts,
+        mirrorRules: prev.mirrorRules ?? [],
+        calendarWatchChannels: prev.calendarWatchChannels,
+      },
+      extraIdentityKeys
+    );
+
+    const loginDisplay = email?.trim() || identityKey;
     const res = NextResponse.redirect(new URL("/", base));
-    const sessionToken = await createSessionToken(sessionSubject);
-    res.cookies.set(SESSION_COOKIE, sessionToken, sessionCookieOptions);
+    const newSession = await createSessionToken(targetUserId, loginDisplay);
+    res.cookies.set(SESSION_COOKIE, newSession, sessionCookieOptions);
     return res;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -13,16 +13,15 @@ export async function proxy(request: NextRequest) {
   }
 
   const tokenEarly = request.cookies.get(SESSION_COOKIE)?.value;
-  let sessionEmailEarly: string | null = null;
+  let sessionUserIdEarly: string | null = null;
   try {
-    sessionEmailEarly = tokenEarly
-      ? await verifySessionToken(tokenEarly)
-      : null;
+    const payload = tokenEarly ? await verifySessionToken(tokenEarly) : null;
+    sessionUserIdEarly = payload?.userId ?? null;
   } catch {
-    sessionEmailEarly = null;
+    sessionUserIdEarly = null;
   }
 
-  if (path === "/login" && sessionEmailEarly) {
+  if (path === "/login" && sessionUserIdEarly) {
     return NextResponse.redirect(new URL("/", request.url));
   }
   if (path === "/login") {
@@ -32,9 +31,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const email = sessionEmailEarly;
-
-  if (!email) {
+  if (!sessionUserIdEarly) {
     if (path.startsWith("/api/")) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
@@ -55,5 +52,7 @@ export const config = {
     "/api/sync",
     "/api/logout",
     "/api/calendars",
+    "/api/calendars/:path*",
+    "/api/events",
   ],
 };

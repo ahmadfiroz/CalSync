@@ -1,13 +1,16 @@
-import type { calendar_v3 } from "googleapis";
+import type { calendar_v3 } from "@googleapis/calendar";
 import type { SyncResult } from "./sync";
 import { runDirectedMirrorSync } from "./sync";
 import { getClientForAccount, getOrCreateCalSyncCalendar } from "./accounts";
-import { readStore, writeStore, isStoreConnected } from "./store";
+import { isStoreConnected } from "./store";
+import { readStoreForUser, writeStoreForUser } from "./store-db";
 
-let syncInFlight: Promise<SyncResult | null> | null = null;
+const syncInFlight = new Map<string, Promise<SyncResult | null>>();
 
-export async function performFullSync(): Promise<SyncResult | null> {
-  const s = readStore();
+export async function performFullSyncForUser(
+  userId: string
+): Promise<SyncResult | null> {
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) return null;
 
   const rules = s.mirrorRules ?? [];
@@ -34,7 +37,7 @@ export async function performFullSync(): Promise<SyncResult | null> {
   }
 
   if (storeNeedsUpdate) {
-    writeStore({ ...s, mirrorRules: updatedRules });
+    await writeStoreForUser(userId, { ...s, mirrorRules: updatedRules });
   }
 
   // Build directed sync inputs using the account we know owns each calendar.
@@ -89,11 +92,15 @@ export async function performFullSync(): Promise<SyncResult | null> {
   return runDirectedMirrorSync(clientFor, syncRules, labels);
 }
 
-/** Single-flight: concurrent triggers coalesce to one run. */
-export function performFullSyncCoalesced(): Promise<SyncResult | null> {
-  if (syncInFlight) return syncInFlight;
-  syncInFlight = performFullSync().finally(() => {
-    syncInFlight = null;
+/** Single-flight per user: concurrent triggers coalesce to one run. */
+export function performFullSyncCoalescedForUser(
+  userId: string
+): Promise<SyncResult | null> {
+  const existing = syncInFlight.get(userId);
+  if (existing) return existing;
+  const p = performFullSyncForUser(userId).finally(() => {
+    syncInFlight.delete(userId);
   });
-  return syncInFlight;
+  syncInFlight.set(userId, p);
+  return p;
 }

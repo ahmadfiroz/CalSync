@@ -812,9 +812,21 @@ export default function Home() {
         fetch("/api/calendars"),
         fetch("/api/config"),
       ]);
-      if (!cr.ok) throw new Error("Could not load calendars");
-      const cj = (await cr.json()) as { calendars: Cal[] };
-      setCalendars(cj.calendars);
+      const calBody = await cr.text();
+      let cj: { calendars?: Cal[]; error?: string; message?: string } = {};
+      if (calBody.trim()) {
+        try {
+          cj = JSON.parse(calBody) as typeof cj;
+        } catch {
+          throw new Error("Could not load calendars (invalid server response)");
+        }
+      }
+      if (!cr.ok) {
+        throw new Error(
+          cj.message || cj.error || "Could not load calendars"
+        );
+      }
+      setCalendars(cj.calendars ?? []);
       if (cfgr.ok) {
         const cfg = (await cfgr.json()) as { mirrorRules?: MirrorRule[] };
         setMirrorRules(cfg.mirrorRules ?? []);
@@ -842,7 +854,6 @@ export default function Home() {
     () => mirrorRules.map((r) => r.id).join("\0"),
     [mirrorRules]
   );
-
   const loadEvents = useCallback(
     async (opts?: { silent?: boolean; signal?: AbortSignal }) => {
       const silent = opts?.silent ?? false;
@@ -856,12 +867,20 @@ export default function Home() {
       try {
         const qs = new URLSearchParams({ days: String(eventsDays) });
         const r = await fetch(`/api/events?${qs.toString()}`, { signal });
-        const j = (await r.json()) as {
+        const raw = await r.text();
+        let j: {
           events?: ListedEvent[];
           loadErrors?: string[];
           error?: string;
           message?: string;
-        };
+        } = {};
+        if (raw.trim()) {
+          try {
+            j = JSON.parse(raw) as typeof j;
+          } catch {
+            throw new Error("Invalid response from events API");
+          }
+        }
         if (signal?.aborted) return;
         if (!r.ok) {
           throw new Error(j.message || j.error || r.statusText);
@@ -1011,8 +1030,13 @@ export default function Home() {
         body: JSON.stringify({ mirrorRules }),
       });
       if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error((j as { error?: string }).error || r.statusText);
+        const j = (await r.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        throw new Error(
+          j.message || j.error || r.statusText || "Save failed"
+        );
       }
       await refresh();
       window.setTimeout(() => void loadEvents({ silent: true }), 4000);

@@ -1,6 +1,4 @@
 import { randomUUID } from "crypto";
-import fs from "fs";
-import path from "path";
 
 export type ConnectedAccount = {
   id: string;
@@ -36,14 +34,15 @@ export type CalSyncStore = {
   calendarWatchChannels?: CalendarWatchChannel[];
 };
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const STORE_FILE = path.join(DATA_DIR, "store.json");
+export const EMPTY_STORE: CalSyncStore = {
+  version: 3,
+  accounts: [],
+  mirrorRules: [],
+};
 
-function ensureDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function normalizeWatchChannels(raw: unknown): CalendarWatchChannel[] | undefined {
+function normalizeWatchChannels(
+  raw: unknown
+): CalendarWatchChannel[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: CalendarWatchChannel[] = [];
   for (const x of raw) {
@@ -105,7 +104,8 @@ function normalizeAccounts(raw: unknown[]): ConnectedAccount[] {
     }));
 }
 
-function normalizeParsed(parsed: unknown): CalSyncStore {
+/** Normalize JSON (from DB or file) into a valid CalSyncStore. */
+export function normalizeParsed(parsed: unknown): CalSyncStore {
   if (parsed && typeof parsed === "object") {
     const p = parsed as Record<string, unknown>;
 
@@ -147,49 +147,6 @@ function normalizeParsed(parsed: unknown): CalSyncStore {
   }
 
   return { version: 3, accounts: [], mirrorRules: [] };
-}
-
-export function readStore(): CalSyncStore | null {
-  try {
-    const raw = fs.readFileSync(STORE_FILE, "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    return normalizeParsed(parsed);
-  } catch {
-    return null;
-  }
-}
-
-export function writeStore(data: CalSyncStore) {
-  if (data.accounts.length === 0) {
-    clearStore();
-    return;
-  }
-  ensureDir();
-  fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2), "utf8");
-}
-
-export function updateStore(partial: Partial<CalSyncStore>) {
-  const cur =
-    readStore() ??
-    ({ version: 3, accounts: [], mirrorRules: [] } satisfies CalSyncStore);
-  const next: CalSyncStore = {
-    version: 3,
-    accounts: partial.accounts ?? cur.accounts,
-    mirrorRules: partial.mirrorRules ?? cur.mirrorRules,
-    calendarWatchChannels:
-      partial.calendarWatchChannels !== undefined
-        ? partial.calendarWatchChannels
-        : cur.calendarWatchChannels,
-  };
-  writeStore(next);
-}
-
-export function clearStore() {
-  try {
-    fs.unlinkSync(STORE_FILE);
-  } catch {
-    /* noop */
-  }
 }
 
 export function isStoreConnected(s: CalSyncStore | null): s is CalSyncStore {

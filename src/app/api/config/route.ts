@@ -1,23 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import {
-  readStore,
-  writeStore,
   isStoreConnected,
   type MirrorRule,
   type CalendarWatchChannel,
 } from "@/lib/store";
+import { readStoreForUser, writeStoreForUser } from "@/lib/store-db";
 import {
   calendarPushAvailable,
   registerWatchesForCalendars,
   stopAllWatchChannels,
 } from "@/lib/calendar-watch";
-import { performFullSyncCoalesced } from "@/lib/run-sync-from-store";
+import { performFullSyncCoalescedForUser } from "@/lib/run-sync-from-store";
+import { requireUserId } from "@/lib/api-session";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const s = readStore();
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
@@ -25,7 +29,11 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const s = readStore();
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
@@ -107,9 +115,9 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  writeStore({ ...s, mirrorRules: rules, calendarWatchChannels });
+  await writeStoreForUser(userId, { ...s, mirrorRules: rules, calendarWatchChannels });
 
-  void performFullSyncCoalesced();
+  void performFullSyncCoalescedForUser(userId);
 
   return NextResponse.json({
     ok: true,

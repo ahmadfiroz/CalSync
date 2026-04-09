@@ -1,5 +1,12 @@
+import { resolveUserIdByIdentityKey } from "@/lib/store-db";
+
 export const SESSION_COOKIE = "calsync_session";
 export const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 30; // 30 days
+
+export type SessionPayload = {
+  userId: string;
+  loginEmail?: string;
+};
 
 function getSessionSecret(): string {
   const s = process.env.CALSYNC_SESSION_SECRET?.trim();
@@ -54,13 +61,17 @@ function base64UrlToBuffer(s: string): Uint8Array {
   return out;
 }
 
-export async function createSessionToken(email: string): Promise<string> {
+export async function createSessionToken(
+  userId: string,
+  loginEmail?: string | null
+): Promise<string> {
   const secret = getSessionSecret();
   const exp = Date.now() + SESSION_MAX_AGE_SEC * 1000;
-  const payloadPart = Buffer.from(
-    JSON.stringify({ e: email, exp }),
-    "utf8"
-  ).toString("base64url");
+  const payload: Record<string, unknown> = { u: userId, exp };
+  if (loginEmail?.trim()) payload.e = loginEmail.trim();
+  const payloadPart = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url"
+  );
   const key = await importHmacKey(secret);
   const sig = await crypto.subtle.sign(
     "HMAC",
@@ -72,25 +83,24 @@ export async function createSessionToken(email: string): Promise<string> {
 
 export async function verifySessionToken(
   token: string
-): Promise<string | null> {
+): Promise<SessionPayload | null> {
   const secret = getSessionSecret();
   const lastDot = token.lastIndexOf(".");
   if (lastDot <= 0) return null;
   const payloadPart = token.slice(0, lastDot);
   const sigPart = token.slice(lastDot + 1);
   if (!payloadPart || !sigPart) return null;
-  let payload: { e?: unknown; exp?: unknown };
+  let payload: { u?: unknown; e?: unknown; exp?: unknown };
   try {
     payload = JSON.parse(
       Buffer.from(payloadPart, "base64url").toString("utf8")
-    ) as { e?: unknown; exp?: unknown };
+    ) as { u?: unknown; e?: unknown; exp?: unknown };
   } catch {
     return null;
   }
-  if (typeof payload.e !== "string" || typeof payload.exp !== "number") {
+  if (typeof payload.exp !== "number" || Date.now() > payload.exp) {
     return null;
   }
-  if (Date.now() > payload.exp) return null;
   const key = await importHmacKey(secret);
   const sigBytes = base64UrlToBuffer(sigPart);
   const ok = await crypto.subtle.verify(
@@ -100,21 +110,43 @@ export async function verifySessionToken(
     new TextEncoder().encode(payloadPart)
   );
   if (!ok) return null;
-  return payload.e;
+
+  if (typeof payload.u === "string" && payload.u) {
+    return {
+      userId: payload.u,
+      loginEmail:
+        typeof payload.e === "string" && payload.e ? payload.e : undefined,
+    };
+  }
+
+  if (typeof payload.e === "string" && payload.e) {
+    try {
+      const userId = await resolveUserIdByIdentityKey(payload.e);
+      if (!userId) return null;
+      return { userId, loginEmail: payload.e };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
+/** @deprecated use verifySessionToken */
 export async function getSessionEmailFromCookieValue(
   value: string | undefined | null
 ): Promise<string | null> {
   if (!value) return null;
-  return verifySessionToken(value);
+  const p = await verifySessionToken(value);
+  return p?.loginEmail ?? null;
 }
 
-export async function getSessionEmailFromCookies(jar: {
+export async function getSessionPayloadFromCookies(jar: {
   get(name: string): { value?: string } | undefined;
-}): Promise<string | null> {
+}): Promise<SessionPayload | null> {
   const v = jar.get(SESSION_COOKIE)?.value;
-  return getSessionEmailFromCookieValue(v);
+  if (!v) return null;
+  return verifySessionToken(v);
 }
 
 export const sessionCookieOptions = {

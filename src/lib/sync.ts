@@ -1,4 +1,4 @@
-import type { calendar_v3 } from "googleapis";
+import type { calendar_v3 } from "@googleapis/calendar";
 import { CALSYNC_SOURCE_KEY, SYNC_WINDOW_DAYS } from "./constants";
 
 export type SyncResult = {

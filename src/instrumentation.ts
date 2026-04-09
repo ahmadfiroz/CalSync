@@ -7,37 +7,59 @@ export async function register() {
 
   const sec = Number(process.env.CALSYNC_AUTO_SYNC_INTERVAL_SEC);
   if (Number.isFinite(sec) && sec >= 30) {
-    const { performFullSyncCoalesced } = await import("./lib/run-sync-from-store");
+    const { performFullSyncCoalescedForUser } = await import(
+      "./lib/run-sync-from-store"
+    );
+    const { listUserIds } = await import("./lib/store-db");
     setInterval(() => {
-      void performFullSyncCoalesced();
+      void (async () => {
+        try {
+          const ids = await listUserIds();
+          for (const userId of ids) {
+            void performFullSyncCoalescedForUser(userId);
+          }
+        } catch {
+          /* missing Supabase env, etc. */
+        }
+      })();
     }, sec * 1000);
   }
 
   const hour = 60 * 60 * 1000;
-  const { readStore, isStoreConnected, writeStore } = await import("./lib/store");
+  const { readStoreForUser, writeStoreForUser, listUserIds } = await import(
+    "./lib/store-db"
+  );
   const { renewExpiringWatches, calendarPushAvailable } = await import(
     "./lib/calendar-watch"
   );
+  const { isStoreConnected } = await import("./lib/store");
 
   setInterval(() => {
     void (async () => {
-      if (!calendarPushAvailable()) return;
-      const s = readStore();
-      if (!isStoreConnected(s)) return;
-      const allSourceCals = Array.from(
-        new Set((s.mirrorRules ?? []).flatMap((r) => r.sourceCals))
-      );
-      if (allSourceCals.length === 0) return;
-      const next = await renewExpiringWatches(
-        s.accounts,
-        allSourceCals,
-        s.calendarWatchChannels
-      );
-      if (next === null) return;
-      writeStore({
-        ...s,
-        calendarWatchChannels: next.length ? next : undefined,
-      });
+      try {
+        if (!calendarPushAvailable()) return;
+        const ids = await listUserIds();
+        for (const userId of ids) {
+          const s = await readStoreForUser(userId);
+          if (!isStoreConnected(s)) continue;
+          const allSourceCals = Array.from(
+            new Set((s.mirrorRules ?? []).flatMap((r) => r.sourceCals))
+          );
+          if (allSourceCals.length === 0) continue;
+          const next = await renewExpiringWatches(
+            s.accounts,
+            allSourceCals,
+            s.calendarWatchChannels
+          );
+          if (next === null) continue;
+          await writeStoreForUser(userId, {
+            ...s,
+            calendarWatchChannels: next.length ? next : undefined,
+          });
+        }
+      } catch {
+        /* noop */
+      }
     })();
   }, hour);
 }
