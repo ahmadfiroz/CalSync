@@ -855,6 +855,32 @@ export default function Home() {
   const [clearMirrorsBusy, setClearMirrorsBusy] = useState<string | null>(null);
   const [clearMirrorsNote, setClearMirrorsNote] = useState<string | null>(null);
 
+  // Create event modal
+  const [createEventOpen, setCreateEventOpen] = useState(false);
+  const [createEventBusy, setCreateEventBusy] = useState(false);
+  const [createEventErr, setCreateEventErr] = useState<string | null>(null);
+  const [createEventForm, setCreateEventForm] = useState<{
+    title: string;
+    calendarId: string;
+    accountId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    allDay: boolean;
+    description: string;
+    location: string;
+  }>({
+    title: "",
+    calendarId: "",
+    accountId: "",
+    date: "",
+    startTime: "09:00",
+    endTime: "10:00",
+    allDay: false,
+    description: "",
+    location: "",
+  });
+
   const refresh = useCallback(async () => {
     setLoadErr(null);
     try {
@@ -1226,6 +1252,37 @@ export default function Home() {
     }
   };
 
+  const openCreateEvent = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    setCreateEventForm((f) => ({ ...f, date: today, title: "", description: "", location: "" }));
+    setCreateEventErr(null);
+    setCreateEventOpen(true);
+  };
+
+  const submitCreateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateEventErr(null);
+    setCreateEventBusy(true);
+    try {
+      const { title, calendarId, accountId, date, startTime, endTime, allDay, description, location } = createEventForm;
+      const start = allDay ? date : `${date}T${startTime}:00`;
+      const end = allDay ? date : `${date}T${endTime}:00`;
+      const r = await fetch("/api/events/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, calendarId, accountId, start, end, allDay, description, location }),
+      });
+      const j = await r.json() as { ok?: boolean; error?: string; message?: string };
+      if (!r.ok) throw new Error(j.message || j.error || "Failed to create event");
+      setCreateEventOpen(false);
+      void loadEvents({ silent: true });
+    } catch (err) {
+      setCreateEventErr(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreateEventBusy(false);
+    }
+  };
+
   const displayError = useMemo(
     () => urlError || loadErr,
     [urlError, loadErr]
@@ -1313,6 +1370,7 @@ export default function Home() {
 
           {dashTab === "events" ? (
             <section className="space-y-4">
+              <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="flex flex-wrap items-end gap-6 gap-y-3">
                 <label className="inline-flex w-full max-w-xs flex-col gap-1">
                   <span className="text-xs font-medium text-zinc-400">
@@ -1338,6 +1396,17 @@ export default function Home() {
                   show={showDeclinedEvents}
                   onShowChange={setShowDeclinedEvents}
                 />
+              </div>
+              {me?.connected ? (
+                <button
+                  type="button"
+                  onClick={openCreateEvent}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-sky-600/90 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-3.5 w-3.5"><path d="M12 5v14M5 12h14"/></svg>
+                  New Event
+                </button>
+              ) : null}
               </div>
               {eventsErr ? (
                 <p
@@ -1941,6 +2010,171 @@ export default function Home() {
           ) : null}
         </div>
       )}
+      {/* Create Event Modal */}
+      {createEventOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setCreateEventOpen(false); }}
+        >
+          <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-zinc-100">New Event</h2>
+              <button
+                type="button"
+                onClick={() => setCreateEventOpen(false)}
+                className="text-zinc-500 hover:text-zinc-300"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <form onSubmit={submitCreateEvent} className="space-y-4">
+              {/* Title */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-zinc-400">Title</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Event title"
+                  value={createEventForm.title}
+                  onChange={(e) => setCreateEventForm((f) => ({ ...f, title: e.target.value }))}
+                  className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Calendar */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-zinc-400">Calendar</label>
+                <select
+                  required
+                  value={createEventForm.calendarId}
+                  onChange={(e) => {
+                    const cal = calendars.find((c) => c.id === e.target.value);
+                    setCreateEventForm((f) => ({
+                      ...f,
+                      calendarId: e.target.value,
+                      accountId: cal?.accountId ?? f.accountId,
+                    }));
+                  }}
+                  className="appearance-none rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+                    backgroundSize: "1.125rem",
+                    backgroundPosition: "right 0.65rem center",
+                    backgroundRepeat: "no-repeat",
+                    paddingRight: "2.25rem",
+                  }}
+                >
+                  <option value="" disabled>Select a calendar</option>
+                  {me?.accounts?.map((acc) => {
+                    const accCals = calendars.filter((c) => c.accountId === acc.id && c.summary !== "CalSync");
+                    if (!accCals.length) return null;
+                    return (
+                      <optgroup key={acc.id} label={acc.email ?? acc.id}>
+                        {accCals.map((c) => (
+                          <option key={c.id} value={c.id}>{c.summary}{c.primary ? " (primary)" : ""}</option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* All day toggle + date */}
+              <div className="flex items-center gap-4">
+                <div className="flex flex-1 flex-col gap-1">
+                  <label className="text-xs font-medium text-zinc-400">Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={createEventForm.date}
+                    onChange={(e) => setCreateEventForm((f) => ({ ...f, date: e.target.value }))}
+                    className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                  />
+                </div>
+                <label className="mt-5 flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={createEventForm.allDay}
+                    onChange={(e) => setCreateEventForm((f) => ({ ...f, allDay: e.target.checked }))}
+                  />
+                  All day
+                </label>
+              </div>
+
+              {/* Time range */}
+              {!createEventForm.allDay && (
+                <div className="flex gap-3">
+                  <div className="flex flex-1 flex-col gap-1">
+                    <label className="text-xs font-medium text-zinc-400">Start time</label>
+                    <input
+                      type="time"
+                      required
+                      value={createEventForm.startTime}
+                      onChange={(e) => setCreateEventForm((f) => ({ ...f, startTime: e.target.value }))}
+                      className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1">
+                    <label className="text-xs font-medium text-zinc-400">End time</label>
+                    <input
+                      type="time"
+                      required
+                      value={createEventForm.endTime}
+                      onChange={(e) => setCreateEventForm((f) => ({ ...f, endTime: e.target.value }))}
+                      className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Location */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-zinc-400">Location <span className="text-zinc-600">(optional)</span></label>
+                <input
+                  type="text"
+                  placeholder="Add location"
+                  value={createEventForm.location}
+                  onChange={(e) => setCreateEventForm((f) => ({ ...f, location: e.target.value }))}
+                  className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Description */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-zinc-400">Description <span className="text-zinc-600">(optional)</span></label>
+                <textarea
+                  rows={2}
+                  placeholder="Add description"
+                  value={createEventForm.description}
+                  onChange={(e) => setCreateEventForm((f) => ({ ...f, description: e.target.value }))}
+                  className="resize-none rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+                />
+              </div>
+
+              {createEventErr ? (
+                <p className="rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2 text-xs text-red-200">{createEventErr}</p>
+              ) : null}
+
+              <div className="flex justify-end gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCreateEventOpen(false)}
+                  className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={createEventBusy}
+                  className="rounded-md bg-sky-600/90 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 disabled:opacity-50"
+                >
+                  {createEventBusy ? "Creating…" : "Create Event"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
