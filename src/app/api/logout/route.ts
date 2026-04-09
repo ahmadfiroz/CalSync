@@ -6,7 +6,6 @@ import {
   isStoreConnected,
   type CalendarWatchChannel,
 } from "@/lib/store";
-import { listAllowedCalendarIds, pruneSyncCalendarIds } from "@/lib/accounts";
 import {
   calendarPushAvailable,
   registerWatchesForCalendars,
@@ -20,7 +19,11 @@ export async function POST(req: NextRequest) {
   let accountId: string | undefined;
   try {
     const body = await req.json();
-    if (body && typeof body === "object" && typeof (body as { accountId?: unknown }).accountId === "string") {
+    if (
+      body &&
+      typeof body === "object" &&
+      typeof (body as { accountId?: unknown }).accountId === "string"
+    ) {
       accountId = (body as { accountId: string }).accountId;
     }
   } catch {
@@ -58,24 +61,33 @@ export async function POST(req: NextRequest) {
 
   await stopAllWatchChannels(s.accounts, s.calendarWatchChannels);
 
-  const allowed = await listAllowedCalendarIds(nextAccounts);
-  const syncCalendarIds = pruneSyncCalendarIds(s.syncCalendarIds ?? [], allowed);
+  // Remove any mirror rules that reference the removed account
+  const remainingAccountIds = new Set(nextAccounts.map((a) => a.id));
+  const mirrorRules = s.mirrorRules.filter(
+    (r) =>
+      remainingAccountIds.has(r.sourceAccountId) &&
+      remainingAccountIds.has(r.destAccountId)
+  );
 
   let calendarWatchChannels: CalendarWatchChannel[] | undefined;
-  if (calendarPushAvailable() && syncCalendarIds.length >= 2) {
-    const registered = await registerWatchesForCalendars(
-      nextAccounts,
-      syncCalendarIds
+  if (calendarPushAvailable() && mirrorRules.length > 0) {
+    const allSourceCals = Array.from(
+      new Set(mirrorRules.flatMap((r) => r.sourceCals))
     );
-    calendarWatchChannels = registered.length ? registered : undefined;
+    if (allSourceCals.length > 0) {
+      const registered = await registerWatchesForCalendars(
+        nextAccounts,
+        allSourceCals
+      );
+      calendarWatchChannels = registered.length ? registered : undefined;
+    }
   }
 
   writeStore({
-    version: 2,
+    version: 3,
     accounts: nextAccounts,
-    syncCalendarIds,
+    mirrorRules,
     calendarWatchChannels,
   });
   return NextResponse.json({ ok: true });
 }
-

@@ -14,7 +14,21 @@ type Me = {
   connected: boolean;
   accounts?: Account[];
   email?: string | null;
-  syncCalendarIds?: string[];
+};
+
+type MirrorRule = {
+  id: string;
+  sourceAccountId: string;
+  sourceCals: string[];
+  destAccountId: string;
+  destCalId: string;
+};
+
+type DraftRule = {
+  sourceAccountId: string;
+  sourceCals: Set<string>;
+  destAccountId: string;
+  destCalId: string;
 };
 
 type Cal = {
@@ -748,7 +762,9 @@ export default function Home() {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [calendars, setCalendars] = useState<Cal[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mirrorRules, setMirrorRules] = useState<MirrorRule[]>([]);
+  const [draftRule, setDraftRule] = useState<Partial<DraftRule> | null>(null);
+  const [draftStep, setDraftStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -789,21 +805,19 @@ export default function Home() {
       setMe(m);
       if (!m.connected) {
         setCalendars([]);
-        setSelected(new Set());
+        setMirrorRules([]);
         return;
       }
-      const cr = await fetch("/api/calendars");
+      const [cr, cfgr] = await Promise.all([
+        fetch("/api/calendars"),
+        fetch("/api/config"),
+      ]);
       if (!cr.ok) throw new Error("Could not load calendars");
       const cj = (await cr.json()) as { calendars: Cal[] };
       setCalendars(cj.calendars);
-      const ids = m.syncCalendarIds ?? [];
-      const known = new Set(cj.calendars.map((c) => c.id));
-      const fromServer = ids.filter((id) => known.has(id));
-      if (fromServer.length) {
-        setSelected(new Set(fromServer));
-      } else {
-        const primaries = cj.calendars.filter((c) => c.primary).map((c) => c.id);
-        setSelected(new Set(primaries));
+      if (cfgr.ok) {
+        const cfg = (await cfgr.json()) as { mirrorRules?: MirrorRule[] };
+        setMirrorRules(cfg.mirrorRules ?? []);
       }
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
@@ -822,9 +836,11 @@ export default function Home() {
     void refresh();
   }, [refresh]);
 
-  const savedSyncGroupKey = useMemo(
-    () => (me?.syncCalendarIds ?? []).join("\0"),
-    [me?.syncCalendarIds]
+  const canSync = mirrorRules.some((r) => r.sourceCals.length > 0);
+
+  const rulesKey = useMemo(
+    () => mirrorRules.map((r) => r.id).join("\0"),
+    [mirrorRules]
   );
 
   const loadEvents = useCallback(
@@ -974,7 +990,7 @@ export default function Home() {
     const ac = new AbortController();
     void loadEvents({ silent: false, signal: ac.signal });
     return () => ac.abort();
-  }, [dashTab, eventsDays, me?.connected, savedSyncGroupKey, loadEvents]);
+  }, [dashTab, eventsDays, me?.connected, rulesKey, loadEvents]);
 
   useEffect(() => {
     if (dashTab !== "events" || !me?.connected) return;
@@ -985,15 +1001,6 @@ export default function Home() {
     return () => window.clearInterval(id);
   }, [dashTab, me?.connected, loadEvents]);
 
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  };
-
   const saveConfig = async () => {
     setSaveBusy(true);
     setLastSync(null);
@@ -1001,7 +1008,7 @@ export default function Home() {
       const r = await fetch("/api/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ syncCalendarIds: Array.from(selected) }),
+        body: JSON.stringify({ mirrorRules }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
@@ -1014,6 +1021,37 @@ export default function Home() {
     } finally {
       setSaveBusy(false);
     }
+  };
+
+  const startDraftRule = () => {
+    setDraftRule({});
+    setDraftStep(1);
+  };
+
+  const cancelDraft = () => {
+    setDraftRule(null);
+  };
+
+  const commitDraftRule = () => {
+    if (
+      !draftRule?.sourceAccountId ||
+      !draftRule.sourceCals?.size ||
+      !draftRule.destAccountId
+    )
+      return;
+    const newRule: MirrorRule = {
+      id: crypto.randomUUID(),
+      sourceAccountId: draftRule.sourceAccountId,
+      sourceCals: Array.from(draftRule.sourceCals),
+      destAccountId: draftRule.destAccountId,
+      destCalId: draftRule.destCalId || "__auto__",
+    };
+    setMirrorRules((prev) => [...prev, newRule]);
+    setDraftRule(null);
+  };
+
+  const removeRule = (id: string) => {
+    setMirrorRules((prev) => prev.filter((r) => r.id !== id));
   };
 
   const runSync = async () => {
@@ -1238,9 +1276,9 @@ export default function Home() {
               ) : expandedVisibleEventRows.length === 0 ? (
                 <p className="text-sm text-zinc-500">
                   {eventsRows.length === 0
-                    ? savedSyncGroupKey === ""
-                      ? "No calendars in your saved sync group. Open Settings, check the calendars you want, and click Save selection."
-                      : "No events in this range for your selected calendars (or only cancelled or “free” items were returned)."
+                    ? mirrorRules.length === 0
+                      ? "No mirror rules configured. Open Settings, add a rule, and click Save."
+                      : 'No events in this range for your selected calendars (or only cancelled or "free" items were returned).'
                     : visibleEventRows.length > 0 && !showDeclinedEvents
                       ? "Declined events are hidden. Turn on Declined events to see them in the list."
                       : "Nothing scheduled right now. Earlier events in this range have ended."}
@@ -1365,10 +1403,15 @@ export default function Home() {
             </p>
           </section>
 
-          <section className="space-y-3 border-t border-zinc-800/50 pt-8">
-            <h2 className="text-sm font-medium text-zinc-200">
-              Calendars in sync group
-            </h2>
+          <section className="space-y-4 border-t border-zinc-800/50 pt-8">
+            <div>
+              <h2 className="text-sm font-medium text-zinc-200">Mirror rules</h2>
+              <p className="mt-1 text-xs text-zinc-500">
+                Each rule reads busy times from a source account and writes them
+                into a CalSync calendar on the destination account.
+              </p>
+            </div>
+
             {clearMirrorsNote ? (
               <p
                 className={`rounded-lg border px-3 py-2 text-xs ${
@@ -1384,53 +1427,336 @@ export default function Home() {
                 {clearMirrorsNote}
               </p>
             ) : null}
-            <div className="space-y-6">
-              {calendarsByAccount.map((g) => (
-                <div key={g.accountId}>
-                  <p className="mb-2 text-xs font-medium text-zinc-500">
-                    {g.accountLabel}
-                  </p>
-                  <ul className="divide-y divide-zinc-800/40">
-                    {g.calendars.map((c) => (
-                      <li key={c.id}>
-                        <div className="flex flex-wrap items-start justify-between gap-2 py-3 hover:bg-zinc-900/30">
-                          <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+
+            {/* Existing rules */}
+            {mirrorRules.length > 0 && (
+              <div className="space-y-3">
+                {mirrorRules.map((rule) => {
+                  const srcAccount = me?.accounts?.find(
+                    (a) => a.id === rule.sourceAccountId
+                  );
+                  const dstAccount = me?.accounts?.find(
+                    (a) => a.id === rule.destAccountId
+                  );
+                  const destCalLabel =
+                    rule.destCalId === "__auto__"
+                      ? "CalSync (auto-create)"
+                      : (calendars.find((c) => c.id === rule.destCalId)
+                          ?.summary ?? rule.destCalId);
+
+                  return (
+                    <div
+                      key={rule.id}
+                      className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 space-y-2">
+                          {/* Source */}
+                          <div>
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 mb-1">
+                              From
+                            </p>
+                            <p className="text-xs font-medium text-zinc-300">
+                              {srcAccount?.email ?? rule.sourceAccountId}
+                            </p>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {rule.sourceCals.map((calId) => {
+                                const cal = calendars.find(
+                                  (c) => c.id === calId
+                                );
+                                return (
+                                  <span
+                                    key={calId}
+                                    className="inline-block rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-300"
+                                  >
+                                    {cal?.summary ?? calId}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Arrow */}
+                          <div className="text-zinc-600 text-xs pl-0.5">↓</div>
+
+                          {/* Destination */}
+                          <div>
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500 mb-1">
+                              To
+                            </p>
+                            <p className="text-xs font-medium text-zinc-300">
+                              {dstAccount?.email ?? rule.destAccountId}
+                            </p>
+                            <div className="mt-1 flex items-center gap-2">
+                              <span className="inline-block rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-300">
+                                {destCalLabel}
+                              </span>
+                              {rule.destCalId !== "__auto__" && (
+                                <button
+                                  type="button"
+                                  disabled={clearMirrorsBusy === rule.destCalId}
+                                  onClick={() => {
+                                    void clearMirrorsForCalendar(
+                                      rule.destCalId,
+                                      destCalLabel
+                                    );
+                                  }}
+                                  className="text-[11px] text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline disabled:opacity-50"
+                                >
+                                  {clearMirrorsBusy === rule.destCalId
+                                    ? "Clearing…"
+                                    : "Clear mirrors"}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removeRule(rule.id)}
+                          className="shrink-0 text-xs text-zinc-600 underline-offset-4 hover:text-zinc-400 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Draft rule wizard */}
+            {draftRule !== null ? (
+              <div className="rounded-xl border border-zinc-700 bg-zinc-900/50 p-4 space-y-4">
+                <p className="text-xs font-semibold text-zinc-200">
+                  New mirror rule
+                </p>
+
+                {draftStep === 1 && (
+                  <div className="space-y-3">
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                      Step 1 of 3 — Source account
+                    </p>
+                    <ul className="space-y-2">
+                      {(me?.accounts ?? []).map((acc) => (
+                        <li key={acc.id}>
+                          <label className="flex cursor-pointer items-center gap-3">
                             <input
-                              type="checkbox"
-                              className="mt-1"
-                              checked={selected.has(c.id)}
-                              onChange={() => toggle(c.id)}
+                              type="radio"
+                              name="draftSrcAccount"
+                              value={acc.id}
+                              checked={draftRule.sourceAccountId === acc.id}
+                              onChange={() =>
+                                setDraftRule((r) => ({
+                                  ...r,
+                                  sourceAccountId: acc.id,
+                                  sourceCals: new Set(),
+                                }))
+                              }
                             />
-                            <span className="text-sm">
-                              <span className="text-zinc-100">
+                            <span className="text-sm text-zinc-100">
+                              {acc.email ?? acc.id}
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={cancelDraft}
+                        className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!draftRule.sourceAccountId}
+                        onClick={() => setDraftStep(2)}
+                        className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-100 hover:bg-zinc-600 disabled:opacity-40"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {draftStep === 2 && (
+                  <div className="space-y-3">
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                      Step 2 of 3 — Calendars to mirror
+                    </p>
+                    <p className="text-xs text-zinc-400">
+                      From{" "}
+                      {me?.accounts?.find(
+                        (a) => a.id === draftRule.sourceAccountId
+                      )?.email ?? draftRule.sourceAccountId}
+                    </p>
+                    <ul className="space-y-2">
+                      {calendars
+                        .filter(
+                          (c) =>
+                            c.accountId === draftRule.sourceAccountId &&
+                            c.summary !== "CalSync"
+                        )
+                        .map((c) => (
+                          <li key={c.id}>
+                            <label className="flex cursor-pointer items-center gap-3">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  draftRule.sourceCals?.has(c.id) ?? false
+                                }
+                                onChange={() =>
+                                  setDraftRule((r) => {
+                                    const s = new Set(r?.sourceCals ?? []);
+                                    if (s.has(c.id)) s.delete(c.id);
+                                    else s.add(c.id);
+                                    return { ...r, sourceCals: s };
+                                  })
+                                }
+                              />
+                              <span className="text-sm text-zinc-100">
                                 {c.summary}
                               </span>
                               {c.primary ? (
-                                <span className="ml-2 text-xs text-amber-400/90">
+                                <span className="text-xs text-amber-400/90">
                                   primary
                                 </span>
                               ) : null}
-                            </span>
-                          </label>
-                          <button
-                            type="button"
-                            disabled={clearMirrorsBusy === c.id}
-                            onClick={() =>
-                              void clearMirrorsForCalendar(c.id, c.summary)
+                            </label>
+                          </li>
+                        ))}
+                    </ul>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setDraftStep(1)}
+                        className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+                      >
+                        ← Back
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!(draftRule.sourceCals?.size)}
+                        onClick={() => setDraftStep(3)}
+                        className="rounded-md bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-100 hover:bg-zinc-600 disabled:opacity-40"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {draftStep === 3 && (
+                  <div className="space-y-3">
+                    <p className="text-[11px] uppercase tracking-wide text-zinc-500">
+                      Step 3 of 3 — Destination
+                    </p>
+                    <div className="space-y-3">
+                      <div>
+                        <p className="mb-1 text-xs text-zinc-400">
+                          Destination account
+                        </p>
+                        <select
+                          value={draftRule.destAccountId ?? ""}
+                          onChange={(e) =>
+                            setDraftRule((r) => ({
+                              ...r,
+                              destAccountId: e.target.value,
+                              destCalId: "__auto__",
+                            }))
+                          }
+                          className="appearance-none rounded-md border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+                          style={{
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2020/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+                            backgroundSize: "1rem",
+                            backgroundPosition: "right 0.5rem center",
+                            backgroundRepeat: "no-repeat",
+                          }}
+                        >
+                          <option value="">Pick an account…</option>
+                          {(me?.accounts ?? [])
+                            .filter(
+                              (a) => a.id !== draftRule.sourceAccountId
+                            )
+                            .map((acc) => (
+                              <option key={acc.id} value={acc.id}>
+                                {acc.email ?? acc.id}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {draftRule.destAccountId && (
+                        <div>
+                          <p className="mb-1 text-xs text-zinc-400">
+                            Destination calendar
+                          </p>
+                          <select
+                            value={draftRule.destCalId ?? "__auto__"}
+                            onChange={(e) =>
+                              setDraftRule((r) => ({
+                                ...r,
+                                destCalId: e.target.value,
+                              }))
                             }
-                            className="shrink-0 text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline disabled:opacity-50"
+                            className="appearance-none rounded-md border border-zinc-700 bg-zinc-800 py-1.5 pl-3 pr-8 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+                            style={{
+                              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2020/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+                              backgroundSize: "1rem",
+                              backgroundPosition: "right 0.5rem center",
+                              backgroundRepeat: "no-repeat",
+                            }}
                           >
-                            {clearMirrorsBusy === c.id
-                              ? "Clearing…"
-                              : "Clear mirrors"}
-                          </button>
+                            <option value="__auto__">
+                              CalSync (auto-create)
+                            </option>
+                            {calendars
+                              .filter(
+                                (c) => c.accountId === draftRule.destAccountId
+                              )
+                              .map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.summary}
+                                </option>
+                              ))}
+                          </select>
                         </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setDraftStep(2)}
+                        className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+                      >
+                        ← Back
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!draftRule.destAccountId}
+                        onClick={commitDraftRule}
+                        className="rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 hover:bg-white disabled:opacity-40"
+                      >
+                        Add rule
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={startDraftRule}
+                className="flex items-center gap-1.5 rounded-lg border border-dashed border-zinc-700 px-4 py-2.5 text-xs font-medium text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+              >
+                <span>+</span> Add mirror rule
+              </button>
+            )}
+
             <div className="flex flex-wrap gap-2 pt-2">
               <button
                 type="button"
@@ -1438,11 +1764,11 @@ export default function Home() {
                 onClick={() => void saveConfig()}
                 className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-50"
               >
-                {saveBusy ? "Saving…" : "Save selection"}
+                {saveBusy ? "Saving…" : "Save"}
               </button>
               <button
                 type="button"
-                disabled={syncing || selected.size < 2}
+                disabled={syncing || !canSync}
                 onClick={() => void runSync()}
                 className="rounded-lg border border-zinc-600 bg-transparent px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
               >

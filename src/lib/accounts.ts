@@ -2,6 +2,41 @@ import type { calendar_v3 } from "googleapis";
 import type { ConnectedAccount } from "./store";
 import { getCalendarClient } from "./google";
 
+export function getClientForAccount(
+  accounts: ConnectedAccount[],
+  accountId: string
+): calendar_v3.Calendar | null {
+  const acc = accounts.find((a) => a.id === accountId);
+  if (!acc) return null;
+  return getCalendarClient(acc.refreshToken);
+}
+
+/**
+ * Finds the "CalSync" calendar on the given account, or creates it if absent.
+ * Returns the calendar ID, or null if the account is not found.
+ */
+export async function getOrCreateCalSyncCalendar(
+  accounts: ConnectedAccount[],
+  accountId: string
+): Promise<string | null> {
+  const cal = getClientForAccount(accounts, accountId);
+  if (!cal) return null;
+
+  let pageToken: string | undefined;
+  do {
+    const res = await cal.calendarList.list({ maxResults: 250, pageToken });
+    for (const c of res.data.items ?? []) {
+      if (c.summary === "CalSync" && c.id) return c.id;
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  const created = await cal.calendars.insert({
+    requestBody: { summary: "CalSync" },
+  });
+  return created.data.id ?? null;
+}
+
 /** Calendars the given accounts can access (union of calendarList). */
 export async function listAllowedCalendarIds(
   accounts: ConnectedAccount[]
@@ -30,13 +65,6 @@ export async function listAllowedCalendarIds(
     }
   }
   return allowed;
-}
-
-export function pruneSyncCalendarIds(
-  syncCalendarIds: string[],
-  allowed: Set<string>
-): string[] {
-  return syncCalendarIds.filter((id) => allowed.has(id));
 }
 
 /** Lower rank = preferred for API calls that create/update events. */

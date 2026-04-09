@@ -47,7 +47,7 @@ export async function registerWatchesForCalendars(
   calendarIds: string[]
 ): Promise<CalendarWatchChannel[]> {
   const address = webhookAddress();
-  if (!address || calendarIds.length < 2) return [];
+  if (!address || calendarIds.length === 0) return [];
 
   const token = process.env.CALSYNC_WEBHOOK_TOKEN?.trim();
   const out: CalendarWatchChannel[] = [];

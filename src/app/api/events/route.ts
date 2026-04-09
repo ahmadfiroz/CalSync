@@ -51,8 +51,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ days, events: [], loadErrors: [] });
   }
 
-  const syncSet = new Set(s.syncCalendarIds ?? []);
-  const selectedCals = directory.filter((c) => syncSet.has(c.id));
+  // Show events from all source calendars across all mirror rules
+  const sourceCalIds = new Set(
+    (s.mirrorRules ?? []).flatMap((r) => r.sourceCals)
+  );
+  const selectedCals = directory.filter((c) => sourceCalIds.has(c.id));
   if (!selectedCals.length) {
     return NextResponse.json({ days, events: [], loadErrors: [] });
   }

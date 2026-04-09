@@ -7,8 +7,7 @@ import {
 } from "@/lib/constants";
 import { google } from "googleapis";
 import { exchangeCodeForTokens, publicBaseUrl } from "@/lib/google";
-import { readStore, writeStore, type CalSyncStore } from "@/lib/store";
-import { listAllowedCalendarIds, pruneSyncCalendarIds } from "@/lib/accounts";
+import { readStore, writeStore } from "@/lib/store";
 import {
   createSessionToken,
   isEmailAllowed,
@@ -70,17 +69,13 @@ export async function GET(req: NextRequest) {
       throw new Error("Google did not return an email or account id.");
     }
 
-    const prev = readStore() ?? ({
-      version: 2,
+    const prev = readStore() ?? {
+      version: 3 as const,
       accounts: [],
-      syncCalendarIds: [],
-    } satisfies CalSyncStore);
-
-    const newAcc = {
-      id: randomUUID(),
-      refreshToken: rt,
-      email,
+      mirrorRules: [],
     };
+
+    const newAcc = { id: randomUUID(), refreshToken: rt, email };
 
     let accounts = [...prev.accounts];
     if (email) {
@@ -88,17 +83,10 @@ export async function GET(req: NextRequest) {
     }
     accounts.push(newAcc);
 
-    let syncCalendarIds = prev.syncCalendarIds ?? [];
-    const calendarIds = await listAllowedCalendarIds(accounts);
-    // Avoid wiping sync selection if every account failed to list (bad token, outage).
-    if (calendarIds.size > 0) {
-      syncCalendarIds = pruneSyncCalendarIds(syncCalendarIds, calendarIds);
-    }
-
     writeStore({
-      version: 2,
+      version: 3,
       accounts,
-      syncCalendarIds,
+      mirrorRules: prev.mirrorRules,
       calendarWatchChannels: prev.calendarWatchChannels,
     });
 

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import {
   readStore,
   writeStore,
   isStoreConnected,
+  type MirrorRule,
   type CalendarWatchChannel,
 } from "@/lib/store";
-import { listAllowedCalendarIds } from "@/lib/accounts";
 import {
   calendarPushAvailable,
   registerWatchesForCalendars,
@@ -20,7 +21,7 @@ export async function GET() {
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
-  return NextResponse.json({ syncCalendarIds: s.syncCalendarIds ?? [] });
+  return NextResponse.json({ mirrorRules: s.mirrorRules ?? [] });
 }
 
 export async function PUT(req: NextRequest) {
@@ -34,35 +35,85 @@ export async function PUT(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const ids = (body as { syncCalendarIds?: unknown }).syncCalendarIds;
-  if (!Array.isArray(ids) || !ids.every((x) => typeof x === "string")) {
-    return NextResponse.json({ error: "syncCalendarIds_required" }, { status: 400 });
+
+  const raw = (body as { mirrorRules?: unknown }).mirrorRules;
+  if (!Array.isArray(raw)) {
+    return NextResponse.json({ error: "mirrorRules_required" }, { status: 400 });
   }
-  const allowed = await listAllowedCalendarIds(s.accounts);
-  for (const id of ids) {
-    if (!allowed.has(id)) {
+
+  const accountIds = new Set(s.accounts.map((a) => a.id));
+  const rules: MirrorRule[] = [];
+
+  for (const item of raw) {
+    if (!item || typeof item !== "object") {
+      return NextResponse.json({ error: "invalid_rule" }, { status: 400 });
+    }
+    const r = item as Record<string, unknown>;
+    if (
+      typeof r.sourceAccountId !== "string" ||
+      typeof r.destAccountId !== "string" ||
+      typeof r.destCalId !== "string" ||
+      !Array.isArray(r.sourceCals) ||
+      !(r.sourceCals as unknown[]).every((c) => typeof c === "string")
+    ) {
+      return NextResponse.json({ error: "invalid_rule" }, { status: 400 });
+    }
+    if ((r.sourceCals as string[]).length === 0) {
       return NextResponse.json(
-        { error: "unknown_calendar", calendarId: id },
+        { error: "sourceCals_empty", message: "Each rule must have at least one source calendar." },
         { status: 400 }
       );
     }
+    if (r.sourceAccountId === r.destAccountId) {
+      return NextResponse.json(
+        { error: "same_account", message: "Source and destination must be different accounts." },
+        { status: 400 }
+      );
+    }
+    if (!accountIds.has(r.sourceAccountId)) {
+      return NextResponse.json(
+        { error: "unknown_account", accountId: r.sourceAccountId },
+        { status: 400 }
+      );
+    }
+    if (!accountIds.has(r.destAccountId)) {
+      return NextResponse.json(
+        { error: "unknown_account", accountId: r.destAccountId },
+        { status: 400 }
+      );
+    }
+    rules.push({
+      id: typeof r.id === "string" ? r.id : randomUUID(),
+      sourceAccountId: r.sourceAccountId,
+      sourceCals: r.sourceCals as string[],
+      destAccountId: r.destAccountId,
+      destCalId: r.destCalId,
+    });
   }
 
   await stopAllWatchChannels(s.accounts, s.calendarWatchChannels);
 
   let calendarWatchChannels: CalendarWatchChannel[] | undefined;
-  if (calendarPushAvailable() && ids.length >= 2) {
-    const registered = await registerWatchesForCalendars(s.accounts, ids);
-    calendarWatchChannels = registered.length ? registered : undefined;
+  if (calendarPushAvailable() && rules.length > 0) {
+    const allSourceCals = Array.from(
+      new Set(rules.flatMap((r) => r.sourceCals))
+    );
+    if (allSourceCals.length > 0) {
+      const registered = await registerWatchesForCalendars(
+        s.accounts,
+        allSourceCals
+      );
+      calendarWatchChannels = registered.length ? registered : undefined;
+    }
   }
 
-  writeStore({ ...s, syncCalendarIds: ids, calendarWatchChannels });
+  writeStore({ ...s, mirrorRules: rules, calendarWatchChannels });
 
   void performFullSyncCoalesced();
 
   return NextResponse.json({
     ok: true,
-    syncCalendarIds: ids,
+    mirrorRules: rules,
     calendarPush: Boolean(calendarWatchChannels?.length),
   });
 }

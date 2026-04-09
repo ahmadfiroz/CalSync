@@ -8,6 +8,18 @@ export type ConnectedAccount = {
   email?: string;
 };
 
+export type MirrorRule = {
+  id: string;
+  /** Account ID whose calendars are the source. */
+  sourceAccountId: string;
+  /** Calendar IDs to read busy blocks from. */
+  sourceCals: string[];
+  /** Account ID that receives the mirror. */
+  destAccountId: string;
+  /** Calendar ID to write mirrors into, or "__auto__" to find/create "CalSync". */
+  destCalId: string;
+};
+
 /** Google Calendar push channel (events.watch); renewed before expiry. */
 export type CalendarWatchChannel = {
   calendarId: string;
@@ -18,10 +30,9 @@ export type CalendarWatchChannel = {
 };
 
 export type CalSyncStore = {
-  version: 2;
+  version: 3;
   accounts: ConnectedAccount[];
-  /** Calendar IDs in the sync group (each blocks the others). */
-  syncCalendarIds: string[];
+  mirrorRules: MirrorRule[];
   calendarWatchChannels?: CalendarWatchChannel[];
 };
 
@@ -49,66 +60,93 @@ function normalizeWatchChannels(raw: unknown): CalendarWatchChannel[] | undefine
   return out.length ? out : undefined;
 }
 
-function normalizeParsed(parsed: unknown): CalSyncStore {
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    "version" in parsed &&
-    "accounts" in parsed &&
-    (parsed as { version: unknown }).version === 2 &&
-    Array.isArray((parsed as { accounts: unknown[] }).accounts)
-  ) {
-    const p = parsed as CalSyncStore;
-    return {
-      version: 2,
-      accounts: p.accounts
-        .filter(
-          (a): a is ConnectedAccount =>
-            Boolean(
-              a &&
-                typeof a === "object" &&
-                typeof (a as ConnectedAccount).id === "string" &&
-                typeof (a as ConnectedAccount).refreshToken === "string"
-            )
-        )
-        .map((a) => ({
-          id: a.id,
-          refreshToken: a.refreshToken,
-          email: typeof a.email === "string" ? a.email : undefined,
-        })),
-      syncCalendarIds: Array.isArray(p.syncCalendarIds)
-        ? p.syncCalendarIds.filter((x): x is string => typeof x === "string")
-        : [],
-      calendarWatchChannels: normalizeWatchChannels(
-        (p as { calendarWatchChannels?: unknown }).calendarWatchChannels
+function normalizeMirrorRules(raw: unknown): MirrorRule[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MirrorRule[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== "object") continue;
+    const o = x as Record<string, unknown>;
+    if (
+      typeof o.id !== "string" ||
+      typeof o.sourceAccountId !== "string" ||
+      typeof o.destAccountId !== "string" ||
+      typeof o.destCalId !== "string" ||
+      !Array.isArray(o.sourceCals)
+    )
+      continue;
+    out.push({
+      id: o.id,
+      sourceAccountId: o.sourceAccountId,
+      sourceCals: (o.sourceCals as unknown[]).filter(
+        (c): c is string => typeof c === "string"
       ),
-    };
+      destAccountId: o.destAccountId,
+      destCalId: o.destCalId,
+    });
+  }
+  return out;
+}
+
+function normalizeAccounts(raw: unknown[]): ConnectedAccount[] {
+  return raw
+    .filter(
+      (a): a is ConnectedAccount =>
+        Boolean(
+          a &&
+            typeof a === "object" &&
+            typeof (a as ConnectedAccount).id === "string" &&
+            typeof (a as ConnectedAccount).refreshToken === "string"
+        )
+    )
+    .map((a) => ({
+      id: a.id,
+      refreshToken: a.refreshToken,
+      email: typeof a.email === "string" ? a.email : undefined,
+    }));
+}
+
+function normalizeParsed(parsed: unknown): CalSyncStore {
+  if (parsed && typeof parsed === "object") {
+    const p = parsed as Record<string, unknown>;
+
+    // v3
+    if (p.version === 3 && Array.isArray(p.accounts)) {
+      return {
+        version: 3,
+        accounts: normalizeAccounts(p.accounts as unknown[]),
+        mirrorRules: normalizeMirrorRules(p.mirrorRules),
+        calendarWatchChannels: normalizeWatchChannels(p.calendarWatchChannels),
+      };
+    }
+
+    // v2 → migrate: drop syncCalendarIds, start with empty rules
+    if (p.version === 2 && Array.isArray(p.accounts)) {
+      return {
+        version: 3,
+        accounts: normalizeAccounts(p.accounts as unknown[]),
+        mirrorRules: [],
+        calendarWatchChannels: normalizeWatchChannels(p.calendarWatchChannels),
+      };
+    }
+
+    // old single-account format
+    if (typeof p.refreshToken === "string") {
+      return {
+        version: 3,
+        accounts: [
+          {
+            id: randomUUID(),
+            refreshToken: p.refreshToken,
+            email: typeof p.email === "string" ? p.email : undefined,
+          },
+        ],
+        mirrorRules: [],
+        calendarWatchChannels: undefined,
+      };
+    }
   }
 
-  const old = parsed as {
-    refreshToken?: string;
-    email?: string;
-    syncCalendarIds?: unknown;
-  };
-  if (old?.refreshToken && typeof old.refreshToken === "string") {
-    const ids = Array.isArray(old.syncCalendarIds)
-      ? old.syncCalendarIds.filter((x): x is string => typeof x === "string")
-      : [];
-    return {
-      version: 2,
-      accounts: [
-        {
-          id: randomUUID(),
-          refreshToken: old.refreshToken,
-          email: typeof old.email === "string" ? old.email : undefined,
-        },
-      ],
-      syncCalendarIds: ids,
-      calendarWatchChannels: undefined,
-    };
-  }
-
-  return { version: 2, accounts: [], syncCalendarIds: [] };
+  return { version: 3, accounts: [], mirrorRules: [] };
 }
 
 export function readStore(): CalSyncStore | null {
@@ -132,11 +170,12 @@ export function writeStore(data: CalSyncStore) {
 
 export function updateStore(partial: Partial<CalSyncStore>) {
   const cur =
-    readStore() ?? ({ version: 2, accounts: [], syncCalendarIds: [] } satisfies CalSyncStore);
+    readStore() ??
+    ({ version: 3, accounts: [], mirrorRules: [] } satisfies CalSyncStore);
   const next: CalSyncStore = {
-    version: 2,
+    version: 3,
     accounts: partial.accounts ?? cur.accounts,
-    syncCalendarIds: partial.syncCalendarIds ?? cur.syncCalendarIds,
+    mirrorRules: partial.mirrorRules ?? cur.mirrorRules,
     calendarWatchChannels:
       partial.calendarWatchChannels !== undefined
         ? partial.calendarWatchChannels

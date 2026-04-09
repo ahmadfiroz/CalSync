@@ -16,6 +16,5 @@ export async function GET() {
     connected: true,
     accounts,
     email: accounts[0]?.email ?? null,
-    syncCalendarIds: s.syncCalendarIds ?? [],
   });
 }

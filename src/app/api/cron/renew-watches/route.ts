@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 
 /**
  * Call periodically (e.g. daily) when deployed serverless so push channels
- * renew before Google’s ~7-day expiry. Requires CALSYNC_CRON_SECRET.
+ * renew before Google's ~7-day expiry. Requires CALSYNC_CRON_SECRET.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CALSYNC_CRON_SECRET?.trim();
@@ -27,14 +27,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: "not_connected" });
   }
 
-  const ids = s.syncCalendarIds ?? [];
-  if (ids.length < 2) {
-    return NextResponse.json({ ok: true, skipped: "need_two_calendars" });
+  const allSourceCals = Array.from(
+    new Set((s.mirrorRules ?? []).flatMap((r) => r.sourceCals))
+  );
+  if (allSourceCals.length === 0) {
+    return NextResponse.json({ ok: true, skipped: "no_source_calendars" });
   }
 
   const next = await renewExpiringWatches(
     s.accounts,
-    ids,
+    allSourceCals,
     s.calendarWatchChannels
   );
 

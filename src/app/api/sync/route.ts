@@ -9,10 +9,14 @@ export async function POST() {
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
-  const ids = s.syncCalendarIds ?? [];
-  if (ids.length < 2) {
+  const rules = s.mirrorRules ?? [];
+  const hasRules = rules.some((r) => r.sourceCals.length > 0);
+  if (!hasRules) {
     return NextResponse.json(
-      { error: "need_two_calendars", message: "Select at least two calendars." },
+      {
+        error: "no_rules",
+        message: "Add at least one mirror rule before syncing.",
+      },
       { status: 400 }
     );
   }

@@ -138,10 +138,11 @@ function toBlockSpec(
   return { key, summary, start: ev.start, end: ev.end };
 }
 
-export async function runMirrorSync(
+/** Directed mirror sync: each rule reads from sourceCals and writes to destCalId. */
+export async function runDirectedMirrorSync(
   clientFor: (calendarId: string) => calendar_v3.Calendar | undefined,
-  calendarIds: string[],
-  calendarLabels: Record<string, string>
+  rules: Array<{ sourceCals: string[]; destCalId: string }>,
+  labels: Record<string, string>
 ): Promise<SyncResult> {
   const result: SyncResult = {
     created: 0,
@@ -156,8 +157,9 @@ export async function runMirrorSync(
       missingStartOrEnd: 0,
     },
   };
-  if (calendarIds.length < 2) {
-    result.errors.push("Select at least two calendars to sync.");
+
+  if (rules.length === 0) {
+    result.errors.push("No mirror rules configured.");
     delete result.skipped;
     return result;
   }
@@ -166,8 +168,15 @@ export async function runMirrorSync(
   const timeMax = new Date(now);
   timeMax.setDate(timeMax.getDate() + SYNC_WINDOW_DAYS);
 
+  // Collect all unique calendar IDs
+  const allIds = new Set<string>();
+  for (const r of rules) {
+    for (const s of r.sourceCals) allIds.add(s);
+    allIds.add(r.destCalId);
+  }
+
   const byCal: Record<string, calendar_v3.Schema$Event[]> = {};
-  for (const id of calendarIds) {
+  for (const id of allIds) {
     const cal = clientFor(id);
     if (!cal) {
       result.errors.push(`No Google account linked for calendar ${id}.`);
@@ -182,51 +191,43 @@ export async function runMirrorSync(
     }
   }
 
-  let listed = 0;
-  for (const id of calendarIds) {
-    listed += byCal[id]?.length ?? 0;
-  }
-  result.eventsListed = listed;
+  result.eventsListed = Object.values(byCal).reduce(
+    (sum, evs) => sum + evs.length,
+    0
+  );
 
-  /** For target calendar T: map sourceKey -> desired block */
+  // Build desired blocks per destination calendar
   const desiredByTarget: Record<string, Map<string, BlockSpec>> = {};
-  for (const targetId of calendarIds) {
-    desiredByTarget[targetId] = new Map();
-  }
-
-  for (const sourceId of calendarIds) {
-    const label = calendarLabels[sourceId] || sourceId;
-    for (const ev of byCal[sourceId] ?? []) {
-      const skipKind = classifySkip(ev);
-      if (skipKind) {
-        result.skipped![skipKind] += 1;
-        continue;
-      }
-      const spec = toBlockSpec(sourceId, ev, label);
-      if (!spec) {
-        result.skipped!.missingStartOrEnd += 1;
-        continue;
-      }
-      for (const targetId of calendarIds) {
-        if (targetId === sourceId) continue;
-        desiredByTarget[targetId]!.set(spec.key, {
-          ...spec,
-          summary:
-            spec.summary.startsWith("Busy (") && spec.summary.endsWith(")")
-              ? spec.summary
-              : `Busy (${label})`,
-        });
+  for (const rule of rules) {
+    if (!desiredByTarget[rule.destCalId]) {
+      desiredByTarget[rule.destCalId] = new Map();
+    }
+    const dest = desiredByTarget[rule.destCalId]!;
+    for (const sourceId of rule.sourceCals) {
+      const label = labels[sourceId] || sourceId;
+      for (const ev of byCal[sourceId] ?? []) {
+        const skipKind = classifySkip(ev);
+        if (skipKind) {
+          result.skipped![skipKind] += 1;
+          continue;
+        }
+        const spec = toBlockSpec(sourceId, ev, label);
+        if (!spec) {
+          result.skipped!.missingStartOrEnd += 1;
+          continue;
+        }
+        dest.set(spec.key, spec);
       }
     }
   }
 
-  for (const targetId of calendarIds) {
+  // Reconcile each destination calendar
+  for (const [targetId, desired] of Object.entries(desiredByTarget)) {
     const targetCal = clientFor(targetId);
     if (!targetCal) {
       result.errors.push(`No Google account linked for calendar ${targetId}.`);
       continue;
     }
-    const desired = desiredByTarget[targetId]!;
     const existing = byCal[targetId] ?? [];
     const mirrors = new Map<string, calendar_v3.Schema$Event>();
     const duplicateMirrorEvents: calendar_v3.Schema$Event[] = [];
@@ -242,10 +243,7 @@ export async function runMirrorSync(
 
     for (const ev of duplicateMirrorEvents) {
       try {
-        await targetCal.events.delete({
-          calendarId: targetId,
-          eventId: ev.id!,
-        });
+        await targetCal.events.delete({ calendarId: targetId, eventId: ev.id! });
         result.deleted += 1;
       } catch (e) {
         result.errors.push(
@@ -285,10 +283,7 @@ export async function runMirrorSync(
 
       if (!existingMirror) {
         try {
-          await targetCal.events.insert({
-            calendarId: targetId,
-            requestBody: body,
-          });
+          await targetCal.events.insert({ calendarId: targetId, requestBody: body });
           result.created += 1;
         } catch (e) {
           result.errors.push(
@@ -332,3 +327,4 @@ export async function runMirrorSync(
 
   return result;
 }
+

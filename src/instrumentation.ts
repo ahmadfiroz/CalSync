@@ -24,11 +24,13 @@ export async function register() {
       if (!calendarPushAvailable()) return;
       const s = readStore();
       if (!isStoreConnected(s)) return;
-      const ids = s.syncCalendarIds ?? [];
-      if (ids.length < 2) return;
+      const allSourceCals = Array.from(
+        new Set((s.mirrorRules ?? []).flatMap((r) => r.sourceCals))
+      );
+      if (allSourceCals.length === 0) return;
       const next = await renewExpiringWatches(
         s.accounts,
-        ids,
+        allSourceCals,
         s.calendarWatchChannels
       );
       if (next === null) return;
