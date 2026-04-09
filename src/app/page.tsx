@@ -65,10 +65,24 @@ function parseGCalDate(isoDate: string): Date {
 }
 
 /** Matches Google Calendar all-day end (exclusive): one day if end = start + 1 day. */
-function formatEventSchedule(ev: ListedEvent): string {
+/** Short timezone label, e.g. "GMT+8", "EST", "IST". */
+function tzLabel(tz?: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en", {
+      timeZoneName: "short",
+      timeZone: tz || undefined,
+    }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch {
+    return tz ?? "";
+  }
+}
+
+function formatEventSchedule(ev: ListedEvent, tz?: string): string {
   const s = ev.start;
   const e = ev.end;
   if (!s) return "—";
+  const tzOpt = tz ? { timeZone: tz } : {};
 
   if (s.date && !s.dateTime) {
     const sd = s.date;
@@ -77,6 +91,7 @@ function formatEventSchedule(ev: ListedEvent): string {
       return parseGCalDate(sd).toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
+        ...tzOpt,
       });
     }
     const sdt = parseGCalDate(sd);
@@ -87,11 +102,12 @@ function formatEventSchedule(ev: ListedEvent): string {
       return sdt.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
+        ...tzOpt,
       });
     }
     const endInclusive = new Date(edt);
     endInclusive.setDate(endInclusive.getDate() - 1);
-    return `${sdt.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    return `${sdt.toLocaleDateString(undefined, { month: "short", day: "numeric", ...tzOpt })} – ${endInclusive.toLocaleDateString(undefined, { month: "short", day: "numeric", ...tzOpt })}`;
   }
 
   if (!s.dateTime) return "—";
@@ -104,6 +120,7 @@ function formatEventSchedule(ev: ListedEvent): string {
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+      ...tzOpt,
     });
   }
 
@@ -119,14 +136,12 @@ function formatEventSchedule(ev: ListedEvent): string {
     datePrefix = start.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
+      ...tzOpt,
     });
   }
 
   const sameDay = startOfLocalDay(start) === startOfLocalDay(end);
-  const tfmt: Intl.DateTimeFormatOptions = {
-    hour: "numeric",
-    minute: "2-digit",
-  };
+  const tfmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", ...tzOpt };
   const a = start.toLocaleTimeString(undefined, tfmt);
   const b = end.toLocaleTimeString(undefined, tfmt);
 
@@ -137,7 +152,7 @@ function formatEventSchedule(ev: ListedEvent): string {
     return `${datePrefix} • ${a}–${b}`;
   }
 
-  return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+  return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...tzOpt })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...tzOpt })}`;
 }
 
 function IconClock(props: SVGProps<SVGSVGElement>) {
@@ -255,10 +270,11 @@ function formatDayHeading(dayMs: number): string {
 }
 
 /** Time / schedule line for an event when a day section header already shows the date. */
-function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
+function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number, tz?: string): string {
   const s = ev.start;
   const e = ev.end;
   if (!s) return "—";
+  const tzOpt = tz ? { timeZone: tz } : {};
 
   if (s.date && !s.dateTime) {
     const sd = s.date;
@@ -268,7 +284,7 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
     if (!ed) {
       return start0 === groupDayMs
         ? "All day"
-        : sdt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        : sdt.toLocaleDateString(undefined, { month: "short", day: "numeric", ...tzOpt });
     }
     const edt = parseGCalDate(ed);
     const dayMs = 86_400_000;
@@ -276,11 +292,11 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
     if (span <= dayMs) {
       return start0 === groupDayMs
         ? "All day"
-        : sdt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        : sdt.toLocaleDateString(undefined, { month: "short", day: "numeric", ...tzOpt });
     }
     const endInclusive = new Date(edt);
     endInclusive.setDate(endInclusive.getDate() - 1);
-    return `${sdt.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${endInclusive.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+    return `${sdt.toLocaleDateString(undefined, { month: "short", day: "numeric", ...tzOpt })} – ${endInclusive.toLocaleDateString(undefined, { month: "short", day: "numeric", ...tzOpt })}`;
   }
 
   if (!s.dateTime) return "—";
@@ -293,13 +309,11 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
+      ...tzOpt,
     });
   }
   const sameDay = startOfLocalDay(start) === startOfLocalDay(end);
-  const tfmt: Intl.DateTimeFormatOptions = {
-    hour: "numeric",
-    minute: "2-digit",
-  };
+  const tfmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit", ...tzOpt };
   const a = start.toLocaleTimeString(undefined, tfmt);
   const b = end.toLocaleTimeString(undefined, tfmt);
   if (sameDay && startOfLocalDay(start) === groupDayMs) {
@@ -317,6 +331,7 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
       datePrefix = start.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
+        ...tzOpt,
       });
     }
     if (datePrefix === "Today" || datePrefix === "Tomorrow") {
@@ -324,7 +339,7 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
     }
     return `${datePrefix} • ${a}–${b}`;
   }
-  return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+  return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...tzOpt })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...tzOpt })}`;
 }
 
 function joinMeetingLabel(url: string): string {
@@ -560,6 +575,7 @@ function AgendaEventRow({
   now,
   declinedHidden,
   isFirstInAgenda,
+  viewTimezone,
 }: {
   ev: ListedEvent;
   groupDayMs?: number;
@@ -567,11 +583,22 @@ function AgendaEventRow({
   now: Date | null;
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
+  viewTimezone?: string;
 }) {
+  const isTimed = Boolean(ev.start?.dateTime);
+  const localTzLabel = isTimed ? tzLabel() : "";
+  const altTzLabel = isTimed && viewTimezone ? tzLabel(viewTimezone) : "";
+  const showAltTz = Boolean(viewTimezone && altTzLabel && altTzLabel !== localTzLabel);
+
   const timeLabel =
     groupDayMs != null
       ? formatEventTimeInDay(ev, groupDayMs)
       : formatEventSchedule(ev);
+  const altTimeLabel = showAltTz
+    ? groupDayMs != null
+      ? formatEventTimeInDay(ev, groupDayMs, viewTimezone)
+      : formatEventSchedule(ev, viewTimezone)
+    : null;
   const headStatus = isListHead && now ? computeListHeadStatus(ev, now) : null;
   const declined = Boolean(ev.declinedBySelf);
   const muted = declined;
@@ -593,13 +620,26 @@ function AgendaEventRow({
         <div
           className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${muted ? "text-zinc-600" : "text-zinc-500"}`}
         >
-          <span className="inline-flex items-center gap-1.5">
-            <IconClock
-              className={`h-3.5 w-3.5 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
-            />
-            <span className={muted ? "text-zinc-500" : "text-zinc-400"}>
-              {timeLabel}
+          <span className="inline-flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1.5">
+              <IconClock
+                className={`h-3.5 w-3.5 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
+              />
+              <span className={muted ? "text-zinc-500" : "text-zinc-400"}>
+                {timeLabel}
+              </span>
+              {localTzLabel && !showAltTz ? (
+                <span className={`text-[10px] ${muted ? "text-zinc-700" : "text-zinc-600"}`}>
+                  {localTzLabel}
+                </span>
+              ) : null}
             </span>
+            {showAltTz && altTimeLabel ? (
+              <span className="ml-5 inline-flex items-center gap-1 text-[11px] text-zinc-600">
+                <span>{altTimeLabel}</span>
+                <span className="text-[10px] text-zinc-700">{altTzLabel}</span>
+              </span>
+            ) : null}
           </span>
           <span className={muted ? "text-zinc-700" : "text-zinc-600"}>·</span>
           <span
@@ -848,6 +888,7 @@ export default function Home() {
   const [dashTab, setDashTab] = useState<"sync" | "events">("events");
   const [eventsDays, setEventsDays] = useState(7);
   const [showDeclinedEvents, setShowDeclinedEvents] = useState(false);
+  const [viewTimezone, setViewTimezone] = useState<string>(""); // "" = local
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsErr, setEventsErr] = useState<string | null>(null);
   const [eventsRows, setEventsRows] = useState<ListedEvent[]>([]);
@@ -1396,6 +1437,63 @@ export default function Home() {
                   show={showDeclinedEvents}
                   onShowChange={setShowDeclinedEvents}
                 />
+                <div className="inline-flex flex-col gap-1">
+                  <label className="text-xs font-medium text-zinc-400">Timezone</label>
+                  <select
+                    value={viewTimezone}
+                    onChange={(e) => setViewTimezone(e.target.value)}
+                    className="min-w-[13rem] appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                    style={{
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+                      backgroundSize: "1.125rem",
+                      backgroundPosition: "right 0.65rem center",
+                      backgroundRepeat: "no-repeat",
+                    }}
+                  >
+                    <option value="">Local time</option>
+                    <optgroup label="Americas">
+                      <option value="America/New_York">New York (ET)</option>
+                      <option value="America/Chicago">Chicago (CT)</option>
+                      <option value="America/Denver">Denver (MT)</option>
+                      <option value="America/Los_Angeles">Los Angeles (PT)</option>
+                      <option value="America/Anchorage">Anchorage (AKT)</option>
+                      <option value="America/Sao_Paulo">São Paulo (BRT)</option>
+                      <option value="America/Toronto">Toronto (ET)</option>
+                      <option value="America/Vancouver">Vancouver (PT)</option>
+                      <option value="America/Mexico_City">Mexico City (CST)</option>
+                    </optgroup>
+                    <optgroup label="Europe / Africa">
+                      <option value="Europe/London">London (GMT/BST)</option>
+                      <option value="Europe/Paris">Paris (CET)</option>
+                      <option value="Europe/Berlin">Berlin (CET)</option>
+                      <option value="Europe/Amsterdam">Amsterdam (CET)</option>
+                      <option value="Europe/Stockholm">Stockholm (CET)</option>
+                      <option value="Europe/Moscow">Moscow (MSK)</option>
+                      <option value="Africa/Cairo">Cairo (EET)</option>
+                      <option value="Africa/Johannesburg">Johannesburg (SAST)</option>
+                    </optgroup>
+                    <optgroup label="Middle East">
+                      <option value="Asia/Dubai">Dubai (GST)</option>
+                      <option value="Asia/Riyadh">Riyadh (AST)</option>
+                      <option value="Asia/Tehran">Tehran (IRST)</option>
+                      <option value="Asia/Jerusalem">Jerusalem (IST)</option>
+                    </optgroup>
+                    <optgroup label="Asia / Pacific">
+                      <option value="Asia/Kolkata">Mumbai / Delhi (IST)</option>
+                      <option value="Asia/Dhaka">Dhaka (BST)</option>
+                      <option value="Asia/Bangkok">Bangkok (ICT)</option>
+                      <option value="Asia/Singapore">Singapore (SGT)</option>
+                      <option value="Asia/Kuala_Lumpur">Kuala Lumpur (MYT)</option>
+                      <option value="Asia/Hong_Kong">Hong Kong (HKT)</option>
+                      <option value="Asia/Shanghai">Beijing / Shanghai (CST)</option>
+                      <option value="Asia/Tokyo">Tokyo (JST)</option>
+                      <option value="Asia/Seoul">Seoul (KST)</option>
+                      <option value="Australia/Sydney">Sydney (AEST)</option>
+                      <option value="Australia/Melbourne">Melbourne (AEST)</option>
+                      <option value="Pacific/Auckland">Auckland (NZST)</option>
+                    </optgroup>
+                  </select>
+                </div>
               </div>
               {me?.connected ? (
                 <button
@@ -1461,6 +1559,7 @@ export default function Home() {
                               Boolean(ev.declinedBySelf) && !showDeclinedEvents
                             }
                             isFirstInAgenda={gi === 0 && ei === 0}
+                            viewTimezone={viewTimezone || undefined}
                           />
                         ))}
                       </ul>
@@ -1488,6 +1587,7 @@ export default function Home() {
                             isFirstInAgenda={
                               eventsGrouped.groups.length === 0 && ni === 0
                             }
+                            viewTimezone={viewTimezone || undefined}
                           />
                         ))}
                       </ul>
