@@ -7,6 +7,7 @@ import {
   useState,
   type SVGProps,
 } from "react";
+import { describeLoginError } from "@/lib/login-error";
 
 type Account = { id: string; email: string | null };
 
@@ -162,6 +163,24 @@ function IconCalendar(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconVideo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...props}
+    >
+      <path d="M23 7v10l-7-5 7-5z" />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+    </svg>
+  );
+}
+
 function eventDayStartMs(ev: ListedEvent): number | null {
   const s = ev.start;
   if (!s) return null;
@@ -262,18 +281,47 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
   return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
-function joinMeetingLabel(url: string): string {
+/** Short label (mobile), full label (desktop), and accessible name for join links. */
+function meetingJoinInfo(url: string): {
+  shortLabel: string;
+  fullLabel: string;
+  ariaLabel: string;
+} {
   try {
     const u = new URL(url);
     const h = u.hostname.toLowerCase();
-    if (h.includes("meet.google")) return "Join Google Meet";
-    if (h.includes("zoom.us")) return "Join Zoom";
-    if (h.includes("teams.microsoft")) return "Join Teams";
-    if (h.includes("webex.com")) return "Join Webex";
+    if (h.includes("meet.google"))
+      return {
+        shortLabel: "Meet",
+        fullLabel: "Join Google Meet",
+        ariaLabel: "Join Google Meet",
+      };
+    if (h.includes("zoom.us"))
+      return {
+        shortLabel: "Zoom",
+        fullLabel: "Join Zoom",
+        ariaLabel: "Join Zoom meeting",
+      };
+    if (h.includes("teams.microsoft"))
+      return {
+        shortLabel: "Teams",
+        fullLabel: "Join Teams",
+        ariaLabel: "Join Microsoft Teams meeting",
+      };
+    if (h.includes("webex.com"))
+      return {
+        shortLabel: "Webex",
+        fullLabel: "Join Webex",
+        ariaLabel: "Join Webex meeting",
+      };
   } catch {
     /* ignore */
   }
-  return "Join meeting";
+  return {
+    shortLabel: "Video",
+    fullLabel: "Join meeting",
+    ariaLabel: "Join video meeting",
+  };
 }
 
 function eventTimedBounds(
@@ -286,6 +334,66 @@ function eventTimedBounds(
   const end = new Date(e).getTime();
   if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return null;
   return { start, end };
+}
+
+/** Busy interval in ms for overlap checks (timed or all-day, local calendar). */
+function eventBusyInterval(ev: ListedEvent): {
+  start: number;
+  end: number;
+} | null {
+  const timed = eventTimedBounds(ev);
+  if (timed) return timed;
+  const s = ev.start;
+  if (s?.date && !s.dateTime) {
+    const startDay = startOfLocalDay(parseGCalDate(s.date));
+    let endExclusive: number;
+    if (ev.end?.date) {
+      endExclusive = startOfLocalDay(parseGCalDate(ev.end.date));
+    } else {
+      endExclusive = startDay + 86_400_000;
+    }
+    if (endExclusive <= startDay) return null;
+    return { start: startDay, end: endExclusive };
+  }
+  return null;
+}
+
+function intervalsOverlap(
+  a: { start: number; end: number },
+  b: { start: number; end: number }
+): boolean {
+  return a.start < b.end && b.start < a.end;
+}
+
+function agendaEventStableKey(ev: ListedEvent): string {
+  return `${ev.calendarId}\0${ev.id ?? "noid"}\0${ev.start?.dateTime ?? ev.start?.date ?? ""}`;
+}
+
+/** Events whose time range overlaps another visible (non-ended) agenda event. */
+/** Overlaps count as conflicts only when both events are still accepted (not declined). */
+function computeConflictKeys(events: ListedEvent[]): Set<string> {
+  const withIv: {
+    ev: ListedEvent;
+    key: string;
+    iv: { start: number; end: number };
+  }[] = [];
+  for (const ev of events) {
+    const iv = eventBusyInterval(ev);
+    if (!iv) continue;
+    withIv.push({ ev, key: agendaEventStableKey(ev), iv });
+  }
+  const conflicted = new Set<string>();
+  for (let i = 0; i < withIv.length; i++) {
+    for (let j = i + 1; j < withIv.length; j++) {
+      if (!intervalsOverlap(withIv[i].iv, withIv[j].iv)) continue;
+      if (withIv[i].ev.declinedBySelf || withIv[j].ev.declinedBySelf) {
+        continue;
+      }
+      conflicted.add(withIv[i].key);
+      conflicted.add(withIv[j].key);
+    }
+  }
+  return conflicted;
 }
 
 /** All-day event: local calendar day `now` falls on an in-range day (end exclusive). */
@@ -413,19 +521,33 @@ function computeListHeadStatus(ev: ListedEvent, now: Date): ListHeadStatus | nul
 function MeetingJoinLink({
   url,
   mutedOutline,
+  variant,
 }: {
   url: string;
   mutedOutline?: boolean;
+  variant: "primary" | "outline";
 }) {
-  if (mutedOutline) {
+  const focusRing =
+    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
+  const { shortLabel, fullLabel, ariaLabel } = meetingJoinInfo(url);
+  const iconClass = "h-3.5 w-3.5 shrink-0";
+  const labelInner = (
+    <>
+      <span className="sm:hidden">{shortLabel}</span>
+      <span className="hidden sm:inline">{fullLabel}</span>
+    </>
+  );
+  if (mutedOutline || variant === "outline") {
     return (
       <a
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center justify-center rounded-md border border-zinc-600/80 bg-transparent px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500"
+        aria-label={ariaLabel}
+        className={`inline-flex max-w-full shrink-0 items-center justify-center gap-1.5 rounded-md border border-zinc-600/80 bg-transparent px-2.5 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300 sm:px-3 ${focusRing} focus-visible:outline-zinc-500`}
       >
-        {joinMeetingLabel(url)}
+        <IconVideo className={iconClass} />
+        {labelInner}
       </a>
     );
   }
@@ -434,9 +556,11 @@ function MeetingJoinLink({
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center justify-center rounded-md bg-sky-600/90 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+      aria-label={ariaLabel}
+      className={`inline-flex max-w-full shrink-0 items-center justify-center gap-1.5 rounded-md bg-sky-600/90 px-2.5 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 sm:px-3 ${focusRing} focus-visible:outline-sky-400`}
     >
-      {joinMeetingLabel(url)}
+      <IconVideo className={iconClass} />
+      {labelInner}
     </a>
   );
 }
@@ -484,6 +608,7 @@ function AgendaEventRow({
   now,
   declinedHidden,
   isFirstInAgenda,
+  hasConflict,
 }: {
   ev: ListedEvent;
   groupDayMs?: number;
@@ -491,6 +616,7 @@ function AgendaEventRow({
   now: Date;
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
+  hasConflict: boolean;
 }) {
   const timeLabel =
     groupDayMs != null
@@ -501,7 +627,7 @@ function AgendaEventRow({
   const muted = declined;
 
   const inner = (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+    <div className="flex flex-row items-start justify-between gap-3 sm:items-center sm:gap-6">
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <EventTitle ev={ev} muted={muted} />
@@ -510,30 +636,41 @@ function AgendaEventRow({
               Declined
             </span>
           ) : null}
+          {hasConflict ? (
+            <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95">
+              Conflict
+            </span>
+          ) : null}
           {headStatus ? (
             <ListHeadTag status={headStatus} muted={muted} />
           ) : null}
         </div>
         <div
-          className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${muted ? "text-zinc-600" : "text-zinc-500"}`}
+          className={`flex max-w-full flex-nowrap items-center gap-x-3 overflow-x-auto text-xs [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${muted ? "text-zinc-600" : "text-zinc-500"}`}
         >
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex shrink-0 items-center gap-1.5">
             <IconClock
               className={`h-3.5 w-3.5 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
             />
-            <span className={muted ? "text-zinc-500" : "text-zinc-400"}>
+            <span
+              className={`whitespace-nowrap tabular-nums ${muted ? "text-zinc-500" : "text-zinc-400"}`}
+            >
               {timeLabel}
             </span>
           </span>
-          <span className={muted ? "text-zinc-700" : "text-zinc-600"}>·</span>
           <span
-            className={`inline-flex max-w-full items-center gap-1.5 text-[11px] ${muted ? "text-zinc-600" : "text-zinc-500"}`}
+            className={`shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
+          >
+            ·
+          </span>
+          <span
+            className={`inline-flex min-w-0 shrink items-center gap-1.5 text-[11px] ${muted ? "text-zinc-600" : "text-zinc-500"}`}
             title={ev.calendarSummary}
           >
             <IconCalendar
               className={`h-3 w-3 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
             />
-            <span className="truncate">{ev.calendarSummary}</span>
+            <span className="min-w-0 truncate">{ev.calendarSummary}</span>
           </span>
         </div>
         {showAccountEmailBelow(ev) ? (
@@ -544,15 +681,19 @@ function AgendaEventRow({
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 flex-col gap-2 sm:min-w-[10.5rem] sm:items-end">
-        {ev.meetingUrl ? (
-          <MeetingJoinLink url={ev.meetingUrl} mutedOutline={muted} />
-        ) : null}
-      </div>
+      {ev.meetingUrl ? (
+        <div className="flex min-w-0 shrink-0 flex-col items-end self-start pt-0.5 sm:min-w-[9rem] sm:self-center sm:pt-0">
+          <MeetingJoinLink
+            url={ev.meetingUrl}
+            mutedOutline={muted}
+            variant={muted || !isListHead ? "outline" : "primary"}
+          />
+        </div>
+      ) : null}
     </div>
   );
 
-  const padY = isFirstInAgenda ? "pt-0 pb-5 sm:pb-5" : "py-5";
+  const padY = isFirstInAgenda ? "pt-0 pb-5" : "py-5";
 
   if (!declined) {
     return (
@@ -569,13 +710,13 @@ function AgendaEventRow({
       className={`grid min-h-0 border-zinc-800/50 transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none ${
         declinedHidden
           ? "grid-rows-[0fr] border-b-0"
-          : "grid-rows-[1fr] border-b"
+          : `grid-rows-[1fr] border-b ${padY}`
       }`}
       aria-hidden={declinedHidden}
     >
       <div className="min-h-0 overflow-hidden">
         <div
-          className={`${padY} transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+          className={`transition-opacity duration-200 ease-out motion-reduce:transition-none ${
             declinedHidden
               ? "pointer-events-none opacity-0"
               : "opacity-100"
@@ -829,7 +970,7 @@ export default function Home() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const e = p.get("error");
-    if (e) setUrlError(e);
+    if (e) setUrlError(describeLoginError(e) ?? e);
   }, []);
 
   useEffect(() => {
@@ -901,6 +1042,11 @@ export default function Home() {
   const visibleEventRows = useMemo(
     () => eventsRows.filter((ev) => !eventHasEnded(ev, agendaNow)),
     [eventsRows, agendaNow]
+  );
+
+  const conflictKeys = useMemo(
+    () => computeConflictKeys(visibleEventRows),
+    [visibleEventRows]
   );
 
   const expandedVisibleEventRows = useMemo(
@@ -1138,7 +1284,7 @@ export default function Home() {
   );
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-12">
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-6 sm:gap-8 sm:py-12">
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-white">
@@ -1158,7 +1304,7 @@ export default function Home() {
 
       {displayError ? (
         <div
-          className="rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200"
+          className="whitespace-pre-line rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm leading-relaxed text-red-200"
           role="alert"
         >
           {displayError}
@@ -1170,10 +1316,10 @@ export default function Home() {
       ) : !me?.connected ? (
         <div className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
           <p className="text-sm text-zinc-300">
-            Sign in with Google and grant calendar access. Your refresh token is
-            stored only in <code className="text-zinc-100">.data/store.json</code>{" "}
-            on this machine (add <code className="text-zinc-100">.data/</code> to
-            backups if you move computers).
+            Connect Google Calendar to grant access. Your refresh token and sync
+            preferences are stored in this instance&apos;s database—not only on
+            your device—so use deployments you trust. Whoever runs this app
+            should secure and back up that database.
           </p>
           <a
             href="/api/auth/google"
@@ -1181,6 +1327,11 @@ export default function Home() {
           >
             Connect Google Calendar
           </a>
+          <p className="text-xs leading-relaxed text-zinc-500">
+            CalSync is experimental and under active development. Use at your own
+            risk—it may change, break, or mishandle calendar data. Do not rely on
+            it for critical or compliance-sensitive scheduling.
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -1220,30 +1371,30 @@ export default function Home() {
           {dashTab === "events" ? (
             <section className="space-y-4">
               <div className="flex flex-wrap items-end gap-6 gap-y-3">
-                <label className="inline-flex w-full max-w-xs flex-col gap-1">
-                  <span className="text-xs font-medium text-zinc-400">
-                    Time range
-                  </span>
-                  <select
-                    value={eventsDays}
-                    onChange={(e) => setEventsDays(Number(e.target.value))}
-                    className="min-w-[11rem] appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-                      backgroundSize: "1.125rem",
-                      backgroundPosition: "right 0.65rem center",
-                      backgroundRepeat: "no-repeat",
-                    }}
-                  >
-                    <option value={7}>Next 7 days</option>
-                    <option value={30}>Next 30 days</option>
-                    <option value={90}>Next 90 days</option>
-                  </select>
-                </label>
-                <DeclinedEventsSwitch
-                  show={showDeclinedEvents}
-                  onShowChange={setShowDeclinedEvents}
-                />
+                  <label className="inline-flex w-full max-w-xs flex-col gap-1">
+                    <span className="text-xs font-medium text-zinc-400">
+                      Time range
+                    </span>
+                    <select
+                      value={eventsDays}
+                      onChange={(e) => setEventsDays(Number(e.target.value))}
+                      className="min-w-[11rem] w-full max-w-xs appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                      style={{
+                        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
+                        backgroundSize: "1.125rem",
+                        backgroundPosition: "right 0.65rem center",
+                        backgroundRepeat: "no-repeat",
+                      }}
+                    >
+                      <option value={7}>Next 7 days</option>
+                      <option value={30}>Next 30 days</option>
+                      <option value={90}>Next 90 days</option>
+                    </select>
+                  </label>
+                  <DeclinedEventsSwitch
+                    show={showDeclinedEvents}
+                    onShowChange={setShowDeclinedEvents}
+                  />
               </div>
               {eventsErr ? (
                 <p
@@ -1300,6 +1451,9 @@ export default function Home() {
                               Boolean(ev.declinedBySelf) && !showDeclinedEvents
                             }
                             isFirstInAgenda={gi === 0 && ei === 0}
+                            hasConflict={conflictKeys.has(
+                              agendaEventStableKey(ev)
+                            )}
                           />
                         ))}
                       </ul>
@@ -1327,6 +1481,9 @@ export default function Home() {
                             isFirstInAgenda={
                               eventsGrouped.groups.length === 0 && ni === 0
                             }
+                            hasConflict={conflictKeys.has(
+                              agendaEventStableKey(ev)
+                            )}
                           />
                         ))}
                       </ul>

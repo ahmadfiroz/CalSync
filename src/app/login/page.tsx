@@ -2,10 +2,11 @@
 
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { describeLoginError } from "@/lib/login-error";
 
 function LoginContent() {
   const searchParams = useSearchParams();
-  const error = searchParams.get("error");
+  const error = describeLoginError(searchParams.get("error"));
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-8 px-4 py-12">
@@ -15,13 +16,15 @@ function LoginContent() {
         </h1>
         <p className="text-sm leading-relaxed text-zinc-400">
           Sign in with Google to open the dashboard. Calendar access is requested
-          so CalSync can sync busy times across your connected accounts.
+          so CalSync can sync busy times across your connected accounts. Tokens
+          and preferences are stored in this instance&apos;s database—not only on
+          your device—so use deployments you trust.
         </p>
       </header>
 
       {error ? (
         <div
-          className="rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200"
+          className="whitespace-pre-line rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm leading-relaxed text-red-200"
           role="alert"
         >
           {error}
@@ -37,11 +40,10 @@ function LoginContent() {
         </a>
       </div>
 
-      <p className="text-center text-[11px] leading-relaxed text-zinc-600">
-        Production deployments should set{" "}
-        <code className="text-zinc-500">CALSYNC_SESSION_SECRET</code> and
-        optionally <code className="text-zinc-500">CALSYNC_ALLOWED_EMAILS</code>{" "}
-        in <code className="text-zinc-500">.env.local</code>.
+      <p className="text-center text-xs leading-relaxed text-zinc-500">
+        CalSync is experimental and under active development. Use at your own
+        risk—it may change, break, or mishandle calendar data. Do not rely on it
+        for critical or compliance-sensitive scheduling.
       </p>
     </main>
   );
@@ -59,7 +61,8 @@ export default function LoginPage() {
             <p className="text-sm leading-relaxed text-zinc-400">
               Sign in with Google to open the dashboard. Calendar access is
               requested so CalSync can sync busy times across your connected
-              accounts.
+              accounts. Tokens and preferences are stored in this instance&apos;s
+              database—not only on your device—so use deployments you trust.
             </p>
           </header>
           <div className="flex justify-center">
@@ -70,6 +73,11 @@ export default function LoginPage() {
               Continue with Google
             </a>
           </div>
+          <p className="text-center text-xs leading-relaxed text-zinc-500">
+            CalSync is experimental and under active development. Use at your
+            own risk—it may change, break, or mishandle calendar data. Do not rely
+            on it for critical or compliance-sensitive scheduling.
+          </p>
         </main>
       }
     >
