@@ -176,6 +176,57 @@ function IconCalendar(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconVideo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...props}
+    >
+      <rect x="2" y="6" width="13" height="12" rx="2" />
+      <path d="M15 10l5.5-3v10l-5.5-3" />
+    </svg>
+  );
+}
+
+function IconMapPin(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      {...props}
+    >
+      <path d="M12 21C12 21 5 13.5 5 8.5a7 7 0 0 1 14 0c0 5-7 12.5-7 12.5z" />
+      <circle cx="12" cy="8.5" r="2.5" />
+    </svg>
+  );
+}
+
+function isNavigationUrl(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return (
+      h.includes("maps.google") ||
+      h.includes("goo.gl") ||
+      h.includes("maps.apple") ||
+      h.includes("waze.com") ||
+      h.includes("bing.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
 function eventDayStartMs(ev: ListedEvent): number | null {
   const s = ev.start;
   if (!s) return null;
@@ -277,6 +328,7 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
 }
 
 function joinMeetingLabel(url: string): string {
+  if (isNavigationUrl(url)) return "Navigate";
   try {
     const u = new URL(url);
     const h = u.hostname.toLowerCase();
@@ -431,15 +483,24 @@ function MeetingJoinLink({
   url: string;
   mutedOutline?: boolean;
 }) {
+  const label = joinMeetingLabel(url);
+  const isNav = isNavigationUrl(url);
+  const icon = isNav ? (
+    <IconMapPin className="h-3.5 w-3.5 shrink-0" />
+  ) : (
+    <IconVideo className="h-3.5 w-3.5 shrink-0" />
+  );
+
   if (mutedOutline) {
     return (
       <a
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center justify-center rounded-md border border-zinc-600/80 bg-transparent px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500"
+        className="inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-600/80 bg-transparent px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500"
       >
-        {joinMeetingLabel(url)}
+        {icon}
+        {label}
       </a>
     );
   }
@@ -448,9 +509,10 @@ function MeetingJoinLink({
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center justify-center rounded-md bg-sky-600/90 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+      className="inline-flex items-center justify-center gap-1.5 rounded-md bg-sky-600/90 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400"
     >
-      {joinMeetingLabel(url)}
+      {icon}
+      {label}
     </a>
   );
 }
@@ -502,7 +564,7 @@ function AgendaEventRow({
   ev: ListedEvent;
   groupDayMs?: number;
   isListHead: boolean;
-  now: Date;
+  now: Date | null;
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
 }) {
@@ -510,7 +572,7 @@ function AgendaEventRow({
     groupDayMs != null
       ? formatEventTimeInDay(ev, groupDayMs)
       : formatEventSchedule(ev);
-  const headStatus = isListHead ? computeListHeadStatus(ev, now) : null;
+  const headStatus = isListHead && now ? computeListHeadStatus(ev, now) : null;
   const declined = Boolean(ev.declinedBySelf);
   const muted = declined;
 
@@ -903,13 +965,13 @@ export default function Home() {
   );
 
   const [eventsNowTick, setEventsNowTick] = useState(0);
-  const agendaNow = useMemo(() => {
-    void eventsNowTick;
-    return new Date();
+  const [agendaNow, setAgendaNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setAgendaNow(new Date());
   }, [eventsNowTick]);
 
   const visibleEventRows = useMemo(
-    () => eventsRows.filter((ev) => !eventHasEnded(ev, agendaNow)),
+    () => agendaNow ? eventsRows.filter((ev) => !eventHasEnded(ev, agendaNow)) : eventsRows,
     [eventsRows, agendaNow]
   );
 
