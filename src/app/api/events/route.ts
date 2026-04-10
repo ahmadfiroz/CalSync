@@ -12,15 +12,27 @@ export const runtime = "nodejs";
 
 const MAX_RANGE_DAYS = 90;
 
-const HTTPS_URL_IN_TEXT = /https?:\/\/[^\s<>\]"')]+/g;
+const URL_IN_TEXT = /(https?:\/\/|facetime:\/\/)[^\s<>\]"')]+/gi;
+const FACETIME_BARE_IN_TEXT = /\bfacetime\.apple\.com\/[^\s<>\]"')]+/gi;
 
 function trimTrailingUrlJunk(s: string): string {
   return s.replace(/[.,;:)]+$/, "");
 }
 
+function normalizeUrlishText(s: string): string {
+  // Calendar descriptions can contain JSON-escaped slashes and HTML entities.
+  return s
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&#47;/gi, "/");
+}
+
 function isPreferredMeetingHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   return (
+    h === "facetime.apple.com" ||
+    h.endsWith(".facetime.apple.com") ||
     h === "zoom.us" ||
     h.endsWith(".zoom.us") ||
     h.includes("meet.google") ||
@@ -29,15 +41,47 @@ function isPreferredMeetingHost(hostname: string): boolean {
   );
 }
 
-/** Zoom and other non–Google Meet links are often only in `location`, not conferenceData. */
+/** Zoom, FaceTime, and other non-Meet links are often only in `location`, not conferenceData. */
 function meetingUrlFromLocation(
   location: string | null | undefined
 ): string | null {
   if (!location?.trim()) return null;
-  const matches = location.match(HTTPS_URL_IN_TEXT);
+  const matches = location.match(URL_IN_TEXT);
   if (!matches?.length) return null;
 
   const candidates = matches.map(trimTrailingUrlJunk);
+
+  for (const m of candidates) {
+    try {
+      const u = new URL(m);
+      if (isPreferredMeetingHost(u.hostname)) return m;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  for (const m of candidates) {
+    try {
+      new URL(m);
+      return m;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function firstMeetingUrlFromText(
+  text: string | null | undefined
+): string | null {
+  if (!text?.trim()) return null;
+  const normalized = normalizeUrlishText(text);
+  const directMatches = normalized.match(URL_IN_TEXT) ?? [];
+  const facetimeBare = (normalized.match(FACETIME_BARE_IN_TEXT) ?? []).map(
+    (m) => `https://${m}`
+  );
+  const candidates = [...directMatches, ...facetimeBare].map(trimTrailingUrlJunk);
+  if (!candidates.length) return null;
 
   for (const m of candidates) {
     try {
@@ -68,7 +112,11 @@ function meetingUrlFromEvent(ev: calendar_v3.Schema$Event): string | null {
     const any = eps.find((e) => e.uri);
     if (any?.uri) return any.uri;
   }
-  return meetingUrlFromLocation(ev.location);
+  const fromLocation = meetingUrlFromLocation(ev.location);
+  if (fromLocation) return fromLocation;
+  const fromDescription = firstMeetingUrlFromText(ev.description);
+  if (fromDescription) return fromDescription;
+  return firstMeetingUrlFromText(ev.conferenceData?.notes);
 }
 
 function rowStartMs(

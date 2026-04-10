@@ -289,6 +289,12 @@ function meetingJoinInfo(url: string): {
 } {
   try {
     const u = new URL(url);
+    if (u.protocol === "facetime:")
+      return {
+        shortLabel: "FaceTime",
+        fullLabel: "Join FaceTime",
+        ariaLabel: "Join FaceTime call",
+      };
     const h = u.hostname.toLowerCase();
     if (h.includes("meet.google"))
       return {
@@ -301,6 +307,12 @@ function meetingJoinInfo(url: string): {
         shortLabel: "Zoom",
         fullLabel: "Join Zoom",
         ariaLabel: "Join Zoom meeting",
+      };
+    if (h.includes("facetime.apple.com"))
+      return {
+        shortLabel: "FaceTime",
+        fullLabel: "Join FaceTime",
+        ariaLabel: "Join FaceTime call",
       };
     if (h.includes("teams.microsoft"))
       return {
@@ -865,7 +877,7 @@ function DeclinedEventsSwitch({
           aria-checked={show}
           aria-labelledby={`${id}-label`}
           onClick={() => onShowChange(!show)}
-          className={`flex h-8 w-14 shrink-0 items-center rounded-full border p-1 transition-colors duration-200 ease-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-reduce:transition-none ${
+          className={`cursor-pointer flex h-8 w-14 shrink-0 items-center rounded-full border p-1 transition-colors duration-200 ease-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-reduce:transition-none ${
             show
               ? "border-sky-600/90 bg-sky-600/90 hover:border-sky-500 hover:bg-sky-500 focus-visible:outline-sky-400"
               : "border-zinc-700 bg-zinc-900 focus-visible:outline-zinc-400"
@@ -1294,7 +1306,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => void signOutDashboard()}
-              className="shrink-0 text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+              className="cursor-pointer shrink-0 text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
             >
               Sign out
             </button>
@@ -1323,7 +1335,7 @@ export default function Home() {
           </p>
           <a
             href="/api/auth/google"
-            className="inline-flex items-center justify-center rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-200"
+            className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 hover:bg-zinc-200"
           >
             Connect Google Calendar
           </a>
@@ -1345,7 +1357,7 @@ export default function Home() {
               role="tab"
               aria-selected={dashTab === "events"}
               onClick={() => setDashTab("events")}
-              className={`-mb-px border-b-2 pb-3 font-medium transition-colors ${
+              className={`-mb-px cursor-pointer border-b-2 pb-3 font-medium transition-colors ${
                 dashTab === "events"
                   ? "border-zinc-100 text-zinc-100"
                   : "border-transparent text-zinc-500 hover:text-zinc-300"
@@ -1358,7 +1370,7 @@ export default function Home() {
               role="tab"
               aria-selected={dashTab === "sync"}
               onClick={() => setDashTab("sync")}
-              className={`-mb-px border-b-2 pb-3 font-medium transition-colors ${
+              className={`-mb-px cursor-pointer border-b-2 pb-3 font-medium transition-colors ${
                 dashTab === "sync"
                   ? "border-zinc-100 text-zinc-100"
                   : "border-transparent text-zinc-500 hover:text-zinc-300"
@@ -1378,7 +1390,7 @@ export default function Home() {
                     <select
                       value={eventsDays}
                       onChange={(e) => setEventsDays(Number(e.target.value))}
-                      className="min-w-[11rem] w-full max-w-xs appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
+                      className="min-w-[11rem] w-full max-w-xs cursor-pointer appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
                       style={{
                         backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
                         backgroundSize: "1.125rem",
@@ -1518,7 +1530,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => void logoutAll()}
-                className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+              className="cursor-pointer text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
               >
                 Disconnect all
               </button>
@@ -1535,7 +1547,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => void disconnectAccount(a.id)}
-                    className="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
+                    className="cursor-pointer text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
                   >
                     Remove
                   </button>
@@ -1544,7 +1556,7 @@ export default function Home() {
             </ul>
             <a
               href="/api/auth/google?add=1"
-              className="inline-flex items-center justify-center rounded-lg border border-zinc-600 bg-zinc-800/50 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800"
+              className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-zinc-600 bg-transparent px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800"
             >
               Add another Google account
             </a>
@@ -1607,7 +1619,7 @@ export default function Home() {
                             onClick={() =>
                               void clearMirrorsForCalendar(c.id, c.summary)
                             }
-                            className="shrink-0 text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline disabled:opacity-50"
+                            className="cursor-pointer shrink-0 text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {clearMirrorsBusy === c.id
                               ? "Clearing…"
@@ -1625,7 +1637,7 @@ export default function Home() {
                 type="button"
                 disabled={saveBusy}
                 onClick={() => void saveConfig()}
-                className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-50"
+                className="cursor-pointer rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saveBusy ? "Saving…" : "Save selection"}
               </button>
@@ -1633,7 +1645,7 @@ export default function Home() {
                 type="button"
                 disabled={syncing || !selectionSavedForSync}
                 onClick={() => void runSync()}
-                className="rounded-lg border border-zinc-600 bg-transparent px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                className="cursor-pointer rounded-lg border border-zinc-600 bg-transparent px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {syncing ? "Syncing…" : "Run sync now"}
               </button>

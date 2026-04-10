@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.3] - 2026-04-10
+
+### Added
+
+- FaceTime join-link support in event extraction and UI labels, including `facetime://` links and `facetime.apple.com` URLs.
+- Description/notes meeting-link fallback parsing in `GET /api/events` so join links still surface when providers only embed them outside `conferenceData`.
+
+### Changed
+
+- Expanded event URL normalization/parsing for escaped slashes and HTML entities before matching meeting links.
+- Dashboard and login interaction polish with pointer cursor treatment for clickable controls and explicit not-allowed cursor states for disabled actions.
+- README dashboard docs now mention Google Meet, Zoom, and FaceTime links in upcoming events.
+
 ## [0.3.2] - 2026-04-09
 
 ### Added

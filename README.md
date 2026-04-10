@@ -143,7 +143,7 @@ Ensure `node`/`npm` are on `PATH` for the service user, or use full paths in `Ex
 
 ## Using the dashboard
 
-- **Upcoming events** — Next 7, 30, or 90 days for calendars in your **saved** sync group. Shows schedule, free transparency, optional Meet links, and a link to Google Calendar. Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
+- **Upcoming events** — Next 7, 30, or 90 days for calendars in your **saved** sync group. Shows schedule, free transparency, optional Google Meet/Zoom/FaceTime links, and a link to Google Calendar. Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
 - **Sync setup** — **Connected Google accounts** (add/remove, disconnect all). **Calendars in sync group** — choose at least two writable calendars; grouped by account with the **primary** calendar first. **Add calendar** creates a new calendar or adds by ID. **Save selection**, then **Run sync now**, or rely on push and optional polling (`CALSYNC_AUTO_SYNC_INTERVAL_SEC`). **Last sync** shows mirror counts and skip reasons.
 
 Tokens and preferences live in **Supabase**; secure and back up that database.
