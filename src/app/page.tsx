@@ -732,6 +732,7 @@ function AgendaEventRow({
     : null;
   const headStatus = isListHead && now ? computeListHeadStatus(ev, now) : null;
   const declined = Boolean(ev.declinedBySelf);
+  const isPending = ev.selfRsvp === "needsAction";
   const muted = declined;
 
   const inner = (
@@ -742,6 +743,11 @@ function AgendaEventRow({
           {declined ? (
             <span className="inline-flex shrink-0 items-center rounded-full border border-zinc-600/60 bg-zinc-900/40 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
               Declined
+            </span>
+          ) : null}
+          {isPending ? (
+            <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/40 px-2 py-0.5 text-[11px] font-medium text-amber-400/90">
+              Invited
             </span>
           ) : null}
           {headStatus ? (
@@ -822,7 +828,7 @@ function AgendaEventRow({
   if (!declined) {
     return (
       <li
-        className={`border-b border-zinc-800/50 ${padY} motion-reduce:transition-none`}
+        className={`border-b border-zinc-800/50 ${padY} motion-reduce:transition-none${isPending ? " border-l-2 border-l-amber-600/60 pl-3" : ""}`}
       >
         {inner}
       </li>
