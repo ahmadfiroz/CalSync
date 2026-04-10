@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type SVGProps,
 } from "react";
@@ -568,6 +569,130 @@ function ListHeadTag({
   );
 }
 
+function tzOffsetLabel(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en", {
+      timeZone: tz,
+      timeZoneName: "longOffset",
+    }).formatToParts(new Date());
+    const raw = parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+    // "GMT+08:00" → "UTC+8", "GMT-05:00" → "UTC-5", "GMT" → "UTC"
+    return raw.replace("GMT", "UTC").replace(/:00$/, "").replace(/:30$/, ":30").replace(/:45$/, ":45");
+  } catch {
+    return "";
+  }
+}
+
+function tzDisplayName(tz: string): string {
+  const short = tzLabel(tz);
+  const offset = tzOffsetLabel(tz);
+  const city = tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
+  return offset ? `${city} — ${short} (${offset})` : `${city} — ${short}`;
+}
+
+function TimezoneCombobox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (tz: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const allZones = useMemo<string[]>(() => {
+    try {
+      return Intl.supportedValuesOf("timeZone") as string[];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allZones.slice(0, 80);
+    return allZones
+      .filter(
+        (tz) =>
+          tz.toLowerCase().includes(q) ||
+          tzLabel(tz).toLowerCase().includes(q) ||
+          tzOffsetLabel(tz).toLowerCase().includes(q)
+      )
+      .slice(0, 80);
+  }, [query, allZones]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const displayValue = value ? tzDisplayName(value) : "";
+
+  return (
+    <div ref={containerRef} className="relative inline-flex flex-col gap-1">
+      <label className="text-xs font-medium text-zinc-400">Timezone</label>
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder={value ? displayValue : "Search timezone…"}
+          value={open ? query : displayValue}
+          onFocus={() => { setOpen(true); setQuery(""); }}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-56 rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-8 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+        />
+        {value ? (
+          <button
+            type="button"
+            onClick={() => { onChange(""); setQuery(""); setOpen(false); }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300"
+            title="Clear"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-3.5 w-3.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        )}
+      </div>
+      {open && (
+        <ul className="absolute left-0 top-full z-50 mt-1 max-h-60 w-72 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-xl">
+          <li>
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); onChange(""); setOpen(false); setQuery(""); }}
+              className={`w-full px-3 py-2 text-left text-sm ${!value ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"}`}
+            >
+              Local time
+            </button>
+          </li>
+          {filtered.map((tz) => (
+            <li key={tz}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); onChange(tz); setOpen(false); setQuery(""); }}
+                className={`w-full px-3 py-2 text-left text-sm ${value === tz ? "bg-zinc-800 text-zinc-100" : "text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"}`}
+              >
+                <span className="block truncate">{tzDisplayName(tz)}</span>
+                <span className="block truncate text-[11px] text-zinc-600">{tz}</span>
+              </button>
+            </li>
+          ))}
+          {filtered.length === 0 && (
+            <li className="px-3 py-2 text-sm text-zinc-600">No timezones found</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function AgendaEventRow({
   ev,
   groupDayMs,
@@ -626,18 +751,12 @@ function AgendaEventRow({
                 className={`h-3.5 w-3.5 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
               />
               <span className={muted ? "text-zinc-500" : "text-zinc-400"}>
-                {timeLabel}
+                {timeLabel}{localTzLabel ? ` (${localTzLabel})` : ""}
               </span>
-              {localTzLabel && !showAltTz ? (
-                <span className={`text-[10px] ${muted ? "text-zinc-700" : "text-zinc-600"}`}>
-                  {localTzLabel}
-                </span>
-              ) : null}
             </span>
             {showAltTz && altTimeLabel ? (
               <span className="ml-5 inline-flex items-center gap-1 text-[11px] text-zinc-600">
-                <span>{altTimeLabel}</span>
-                <span className="text-[10px] text-zinc-700">{altTzLabel}</span>
+                <span>{altTimeLabel}{altTzLabel ? ` (${altTzLabel})` : ""}</span>
               </span>
             ) : null}
           </span>
@@ -1437,63 +1556,7 @@ export default function Home() {
                   show={showDeclinedEvents}
                   onShowChange={setShowDeclinedEvents}
                 />
-                <div className="inline-flex flex-col gap-1">
-                  <label className="text-xs font-medium text-zinc-400">Timezone</label>
-                  <select
-                    value={viewTimezone}
-                    onChange={(e) => setViewTimezone(e.target.value)}
-                    className="min-w-[13rem] appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
-                    style={{
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-                      backgroundSize: "1.125rem",
-                      backgroundPosition: "right 0.65rem center",
-                      backgroundRepeat: "no-repeat",
-                    }}
-                  >
-                    <option value="">Local time</option>
-                    <optgroup label="Americas">
-                      <option value="America/New_York">New York (ET)</option>
-                      <option value="America/Chicago">Chicago (CT)</option>
-                      <option value="America/Denver">Denver (MT)</option>
-                      <option value="America/Los_Angeles">Los Angeles (PT)</option>
-                      <option value="America/Anchorage">Anchorage (AKT)</option>
-                      <option value="America/Sao_Paulo">São Paulo (BRT)</option>
-                      <option value="America/Toronto">Toronto (ET)</option>
-                      <option value="America/Vancouver">Vancouver (PT)</option>
-                      <option value="America/Mexico_City">Mexico City (CST)</option>
-                    </optgroup>
-                    <optgroup label="Europe / Africa">
-                      <option value="Europe/London">London (GMT/BST)</option>
-                      <option value="Europe/Paris">Paris (CET)</option>
-                      <option value="Europe/Berlin">Berlin (CET)</option>
-                      <option value="Europe/Amsterdam">Amsterdam (CET)</option>
-                      <option value="Europe/Stockholm">Stockholm (CET)</option>
-                      <option value="Europe/Moscow">Moscow (MSK)</option>
-                      <option value="Africa/Cairo">Cairo (EET)</option>
-                      <option value="Africa/Johannesburg">Johannesburg (SAST)</option>
-                    </optgroup>
-                    <optgroup label="Middle East">
-                      <option value="Asia/Dubai">Dubai (GST)</option>
-                      <option value="Asia/Riyadh">Riyadh (AST)</option>
-                      <option value="Asia/Tehran">Tehran (IRST)</option>
-                      <option value="Asia/Jerusalem">Jerusalem (IST)</option>
-                    </optgroup>
-                    <optgroup label="Asia / Pacific">
-                      <option value="Asia/Kolkata">Mumbai / Delhi (IST)</option>
-                      <option value="Asia/Dhaka">Dhaka (BST)</option>
-                      <option value="Asia/Bangkok">Bangkok (ICT)</option>
-                      <option value="Asia/Singapore">Singapore (SGT)</option>
-                      <option value="Asia/Kuala_Lumpur">Kuala Lumpur (MYT)</option>
-                      <option value="Asia/Hong_Kong">Hong Kong (HKT)</option>
-                      <option value="Asia/Shanghai">Beijing / Shanghai (CST)</option>
-                      <option value="Asia/Tokyo">Tokyo (JST)</option>
-                      <option value="Asia/Seoul">Seoul (KST)</option>
-                      <option value="Australia/Sydney">Sydney (AEST)</option>
-                      <option value="Australia/Melbourne">Melbourne (AEST)</option>
-                      <option value="Pacific/Auckland">Auckland (NZST)</option>
-                    </optgroup>
-                  </select>
-                </div>
+                <TimezoneCombobox value={viewTimezone} onChange={setViewTimezone} />
               </div>
               {me?.connected ? (
                 <button
