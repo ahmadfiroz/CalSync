@@ -59,6 +59,8 @@ type ListedEvent = {
   accountId?: string | null;
   /** Present when this event is an instance of a recurring series. */
   recurringEventId?: string | null;
+  /** True for both master recurring events (recurrence[]) and expanded instances (recurringEventId). */
+  isRecurring?: boolean;
 };
 
 function startOfLocalDay(d: Date): number {
@@ -812,7 +814,7 @@ function AgendaEventRow({
                   key={r}
                   type="button"
                   onClick={() => {
-                    if (ev.recurringEventId) {
+                    if (ev.isRecurring) {
                       setPendingResponse(pendingResponse === r ? null : r);
                     } else {
                       onRsvp(ev.calendarId, ev.id!, ev.accountId!, r, "this");
@@ -830,7 +832,7 @@ function AgendaEventRow({
                 </button>
               ))}
             </div>
-            {pendingResponse && ev.recurringEventId ? (
+            {pendingResponse && ev.isRecurring ? (
               <div className="inline-flex items-center gap-1 rounded border border-zinc-800/60 bg-zinc-900/60 px-1.5 py-1">
                 <span className="mr-0.5 text-[10px] text-zinc-500">Apply to:</span>
                 <button
@@ -846,7 +848,9 @@ function AgendaEventRow({
                 <button
                   type="button"
                   onClick={() => {
-                    onRsvp(ev.calendarId, ev.id!, ev.accountId!, pendingResponse, "all", ev.recurringEventId!);
+                    // For instances: use recurringEventId (master); for master events: use own id
+                    const masterId = ev.recurringEventId ?? ev.id!;
+                    onRsvp(ev.calendarId, ev.id!, ev.accountId!, pendingResponse, "all", masterId);
                     setPendingResponse(null);
                   }}
                   className="rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-700/60"

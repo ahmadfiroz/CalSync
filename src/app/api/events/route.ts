@@ -139,6 +139,7 @@ export async function GET(req: NextRequest) {
       selfRsvp: string | null;
       accountId: string;
       recurringEventId: string | null;
+      isRecurring: boolean;
     }[] = [];
 
     const settled = await Promise.allSettled(
@@ -173,6 +174,7 @@ export async function GET(req: NextRequest) {
             selfRsvp: getSelfRsvp(ev),
             accountId: calInfo.accountId,
             recurringEventId: ev.recurringEventId ?? null,
+            isRecurring: !!(ev.recurringEventId || (ev.recurrence && ev.recurrence.length > 0)),
           });
         }
       })
