@@ -57,6 +57,8 @@ type ListedEvent = {
   selfRsvp?: string | null;
   /** Account ID that owns this calendar, needed for RSVP calls. */
   accountId?: string | null;
+  /** Present when this event is an instance of a recurring series. */
+  recurringEventId?: string | null;
 };
 
 function startOfLocalDay(d: Date): number {
@@ -714,8 +716,9 @@ function AgendaEventRow({
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
   viewTimezone?: string;
-  onRsvp?: (calendarId: string, eventId: string, accountId: string, response: "accepted" | "declined" | "tentative") => void;
+  onRsvp?: (calendarId: string, eventId: string, accountId: string, response: "accepted" | "declined" | "tentative", scope: "this" | "all", recurringEventId?: string) => void;
 }) {
+  const [pendingResponse, setPendingResponse] = useState<"accepted" | "declined" | "tentative" | null>(null);
   const isTimed = Boolean(ev.start?.dateTime);
   const localTzLabel = isTimed ? tzLabel() : "";
   const altTzLabel = isTimed && viewTimezone ? tzLabel(viewTimezone) : "";
@@ -796,27 +799,62 @@ function AgendaEventRow({
           <MeetingJoinLink url={ev.meetingUrl} mutedOutline={muted} />
         ) : null}
         {ev.selfRsvp != null && ev.id && ev.accountId && onRsvp ? (
-          <div className="inline-flex items-center gap-0.5 rounded-md border border-zinc-800/60 bg-zinc-900/30 p-0.5">
-            {(
-              [
-                { r: "accepted", label: "Yes", active: "bg-emerald-800/60 text-emerald-300" },
-                { r: "tentative", label: "Maybe", active: "bg-zinc-700/60 text-zinc-200" },
-                { r: "declined", label: "No", active: "bg-red-900/50 text-red-400" },
-              ] as const
-            ).map(({ r, label, active }) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => onRsvp(ev.calendarId, ev.id!, ev.accountId!, r)}
-                className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
-                  ev.selfRsvp === r
-                    ? active
-                    : "text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-300"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex flex-col items-end gap-1">
+            <div className="inline-flex items-center gap-0.5 rounded-md border border-zinc-800/60 bg-zinc-900/30 p-0.5">
+              {(
+                [
+                  { r: "accepted", label: "Yes", active: "bg-emerald-800/60 text-emerald-300" },
+                  { r: "tentative", label: "Maybe", active: "bg-zinc-700/60 text-zinc-200" },
+                  { r: "declined", label: "No", active: "bg-red-900/50 text-red-400" },
+                ] as const
+              ).map(({ r, label, active }) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => {
+                    if (ev.recurringEventId) {
+                      setPendingResponse(pendingResponse === r ? null : r);
+                    } else {
+                      onRsvp(ev.calendarId, ev.id!, ev.accountId!, r, "this");
+                    }
+                  }}
+                  className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                    ev.selfRsvp === r
+                      ? active
+                      : pendingResponse === r
+                        ? "bg-zinc-800 text-zinc-200"
+                        : "text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {pendingResponse && ev.recurringEventId ? (
+              <div className="inline-flex items-center gap-1 rounded border border-zinc-800/60 bg-zinc-900/60 px-1.5 py-1">
+                <span className="mr-0.5 text-[10px] text-zinc-500">Apply to:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRsvp(ev.calendarId, ev.id!, ev.accountId!, pendingResponse, "this");
+                    setPendingResponse(null);
+                  }}
+                  className="rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-700/60"
+                >
+                  This event
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRsvp(ev.calendarId, ev.id!, ev.accountId!, pendingResponse, "all", ev.recurringEventId!);
+                    setPendingResponse(null);
+                  }}
+                  className="rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-700/60"
+                >
+                  All events
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -1484,26 +1522,31 @@ export default function Home() {
       calendarId: string,
       eventId: string,
       accountId: string,
-      response: "accepted" | "declined" | "tentative"
+      response: "accepted" | "declined" | "tentative",
+      scope: "this" | "all",
+      recurringEventId?: string
     ) => {
-      // Optimistic update
+      // Optimistic update: for "all", update every instance in the series
       setEventsRows((rows) =>
-        rows.map((r) =>
-          r.id === eventId && r.calendarId === calendarId
+        rows.map((r) => {
+          const matches =
+            scope === "all" && recurringEventId
+              ? r.recurringEventId === recurringEventId && r.calendarId === calendarId
+              : r.id === eventId && r.calendarId === calendarId;
+          return matches
             ? { ...r, selfRsvp: response, declinedBySelf: response === "declined" }
-            : r
-        )
+            : r;
+        })
       );
       try {
         const res = await fetch("/api/events/rsvp", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ calendarId, eventId, accountId, response }),
+          body: JSON.stringify({ calendarId, eventId, accountId, response, scope, recurringEventId }),
         });
         const j = await res.json() as { ok?: boolean; error?: string; message?: string };
         if (!res.ok) throw new Error(j.message || j.error || "RSVP failed");
       } catch (err) {
-        // Revert on error by reloading
         console.error("[CalSync] RSVP error:", err);
         void loadEvents({ silent: true });
       }

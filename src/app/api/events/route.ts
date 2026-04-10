@@ -138,6 +138,7 @@ export async function GET(req: NextRequest) {
       declinedBySelf: boolean;
       selfRsvp: string | null;
       accountId: string;
+      recurringEventId: string | null;
     }[] = [];
 
     const settled = await Promise.allSettled(
@@ -171,6 +172,7 @@ export async function GET(req: NextRequest) {
             declinedBySelf: isEventDeclinedBySelf(ev),
             selfRsvp: getSelfRsvp(ev),
             accountId: calInfo.accountId,
+            recurringEventId: ev.recurringEventId ?? null,
           });
         }
       })

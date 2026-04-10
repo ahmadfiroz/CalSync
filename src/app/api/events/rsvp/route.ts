@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   }
 
   const b = body as Record<string, unknown>;
-  const { calendarId, eventId, accountId, response } = b;
+  const { calendarId, eventId, accountId, response, scope, recurringEventId } = b;
 
   if (typeof calendarId !== "string" || !calendarId) {
     return NextResponse.json({ error: "calendarId_required" }, { status: 400 });
@@ -42,14 +42,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_response" }, { status: 400 });
   }
 
+  // scope: "this" (default) patches the instance; "all" patches the master recurring event
+  const applyToAll =
+    scope === "all" &&
+    typeof recurringEventId === "string" &&
+    recurringEventId.length > 0;
+
+  const targetEventId = applyToAll ? (recurringEventId as string) : eventId;
+
   const cal = getClientForAccount(s.accounts, accountId);
   if (!cal) {
     return NextResponse.json({ error: "no_client" }, { status: 500 });
   }
 
   try {
-    // Fetch the event to get the full attendees list
-    const ev = await cal.events.get({ calendarId, eventId });
+    // Fetch the target event to get the full attendees list
+    const ev = await cal.events.get({ calendarId, eventId: targetEventId });
     const attendees = ev.data.attendees ?? [];
     const selfIdx = attendees.findIndex((a) => a.self === true);
 
@@ -62,7 +70,7 @@ export async function POST(req: NextRequest) {
 
     await cal.events.patch({
       calendarId,
-      eventId,
+      eventId: targetEventId,
       sendUpdates: "all",
       requestBody: { attendees: updated },
     });
