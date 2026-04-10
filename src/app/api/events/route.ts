@@ -71,6 +71,11 @@ function meetingUrlFromEvent(ev: calendar_v3.Schema$Event): string | null {
   return meetingUrlFromLocation(ev.location);
 }
 
+function getSelfRsvp(ev: calendar_v3.Schema$Event): string | null {
+  const attendee = ev.attendees?.find((a) => a.self === true);
+  return attendee?.responseStatus ?? null;
+}
+
 function rowStartMs(
   start: calendar_v3.Schema$EventDateTime | null | undefined
 ): number {
@@ -131,6 +136,8 @@ export async function GET(req: NextRequest) {
       transparency: string | null;
       meetingUrl: string | null;
       declinedBySelf: boolean;
+      selfRsvp: string | null;
+      accountId: string;
     }[] = [];
 
     const settled = await Promise.allSettled(
@@ -162,6 +169,8 @@ export async function GET(req: NextRequest) {
             transparency: ev.transparency ?? null,
             meetingUrl: meetingUrlFromEvent(ev),
             declinedBySelf: isEventDeclinedBySelf(ev),
+            selfRsvp: getSelfRsvp(ev),
+            accountId: calInfo.accountId,
           });
         }
       })

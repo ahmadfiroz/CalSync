@@ -53,6 +53,10 @@ type ListedEvent = {
   meetingUrl: string | null;
   /** True when your RSVP on this copy is Declined. */
   declinedBySelf?: boolean;
+  /** "accepted" | "declined" | "tentative" | "needsAction" | null (not an attendee) */
+  selfRsvp?: string | null;
+  /** Account ID that owns this calendar, needed for RSVP calls. */
+  accountId?: string | null;
 };
 
 function startOfLocalDay(d: Date): number {
@@ -701,6 +705,7 @@ function AgendaEventRow({
   declinedHidden,
   isFirstInAgenda,
   viewTimezone,
+  onRsvp,
 }: {
   ev: ListedEvent;
   groupDayMs?: number;
@@ -709,6 +714,7 @@ function AgendaEventRow({
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
   viewTimezone?: string;
+  onRsvp?: (calendarId: string, eventId: string, accountId: string, response: "accepted" | "declined" | "tentative") => void;
 }) {
   const isTimed = Boolean(ev.start?.dateTime);
   const localTzLabel = isTimed ? tzLabel() : "";
@@ -782,6 +788,30 @@ function AgendaEventRow({
       <div className="flex shrink-0 flex-col gap-2 sm:min-w-[10.5rem] sm:items-end">
         {ev.meetingUrl ? (
           <MeetingJoinLink url={ev.meetingUrl} mutedOutline={muted} />
+        ) : null}
+        {ev.selfRsvp != null && ev.id && ev.accountId && onRsvp ? (
+          <div className="inline-flex items-center gap-0.5 rounded-md border border-zinc-800/60 bg-zinc-900/30 p-0.5">
+            {(
+              [
+                { r: "accepted", label: "Yes", active: "bg-emerald-800/60 text-emerald-300" },
+                { r: "tentative", label: "Maybe", active: "bg-zinc-700/60 text-zinc-200" },
+                { r: "declined", label: "No", active: "bg-red-900/50 text-red-400" },
+              ] as const
+            ).map(({ r, label, active }) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => onRsvp(ev.calendarId, ev.id!, ev.accountId!, r)}
+                className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+                  ev.selfRsvp === r
+                    ? active
+                    : "text-zinc-600 hover:bg-zinc-800/60 hover:text-zinc-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         ) : null}
       </div>
     </div>
@@ -1443,6 +1473,38 @@ export default function Home() {
     }
   };
 
+  const handleRsvp = useCallback(
+    async (
+      calendarId: string,
+      eventId: string,
+      accountId: string,
+      response: "accepted" | "declined" | "tentative"
+    ) => {
+      // Optimistic update
+      setEventsRows((rows) =>
+        rows.map((r) =>
+          r.id === eventId && r.calendarId === calendarId
+            ? { ...r, selfRsvp: response, declinedBySelf: response === "declined" }
+            : r
+        )
+      );
+      try {
+        const res = await fetch("/api/events/rsvp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ calendarId, eventId, accountId, response }),
+        });
+        const j = await res.json() as { ok?: boolean; error?: string; message?: string };
+        if (!res.ok) throw new Error(j.message || j.error || "RSVP failed");
+      } catch (err) {
+        // Revert on error by reloading
+        console.error("[CalSync] RSVP error:", err);
+        void loadEvents({ silent: true });
+      }
+    },
+    [loadEvents]
+  );
+
   const displayError = useMemo(
     () => urlError || loadErr,
     [urlError, loadErr]
@@ -1623,6 +1685,7 @@ export default function Home() {
                             }
                             isFirstInAgenda={gi === 0 && ei === 0}
                             viewTimezone={viewTimezone || undefined}
+                            onRsvp={handleRsvp}
                           />
                         ))}
                       </ul>
@@ -1651,6 +1714,7 @@ export default function Home() {
                               eventsGrouped.groups.length === 0 && ni === 0
                             }
                             viewTimezone={viewTimezone || undefined}
+                            onRsvp={handleRsvp}
                           />
                         ))}
                       </ul>
