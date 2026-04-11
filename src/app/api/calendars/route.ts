@@ -16,11 +16,11 @@ export async function GET() {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
     const s = await readStoreForUser(userId);
-    const items = await listCalendarsMerged(s);
-    if (!items) {
+    const dir = await listCalendarsMerged(s);
+    if (!dir) {
       return NextResponse.json({ error: "not_connected" }, { status: 401 });
     }
-    return NextResponse.json({ calendars: items });
+    return NextResponse.json({ calendars: dir.calendars, staleAccounts: dir.staleAccounts });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: "google_api", message: msg }, { status: 502 });

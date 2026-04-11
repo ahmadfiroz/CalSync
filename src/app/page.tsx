@@ -1140,7 +1140,7 @@ export default function Home() {
         fetch("/api/config"),
       ]);
       const calBody = await cr.text();
-      let cj: { calendars?: Cal[]; error?: string; message?: string } = {};
+      let cj: { calendars?: Cal[]; staleAccounts?: string[]; error?: string; message?: string } = {};
       if (calBody.trim()) {
         try {
           cj = JSON.parse(calBody) as typeof cj;
@@ -1154,6 +1154,7 @@ export default function Home() {
         );
       }
       setCalendars(cj.calendars ?? []);
+      if (cj.staleAccounts?.length) setStaleAccounts(cj.staleAccounts);
       if (cfgr.ok) {
         const cfg = (await cfgr.json()) as { mirrorRules?: MirrorRule[] };
         setMirrorRules(cfg.mirrorRules ?? []);
@@ -1585,7 +1586,24 @@ export default function Home() {
         </div>
       </header>
 
-      {displayError ? (
+      {staleAccounts.length > 0 ? (
+        <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm">
+          <p className="font-medium text-amber-300">
+            Google session expired: {staleAccounts.join(", ")}
+          </p>
+          <p className="mt-0.5 text-xs text-amber-200/70">
+            Go to{" "}
+            <button
+              type="button"
+              onClick={() => setDashTab("sync")}
+              className="underline underline-offset-2 hover:text-amber-100"
+            >
+              Sync Setup
+            </button>{" "}
+            and use <strong>Add another Google account</strong> to re-connect.
+          </p>
+        </div>
+      ) : displayError ? (
         <div
           className="rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200"
           role="alert"
@@ -1694,24 +1712,6 @@ export default function Home() {
                 >
                   {eventsErr}
                 </p>
-              ) : null}
-              {staleAccounts.length > 0 ? (
-                <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-200/90">
-                  <p className="font-medium text-amber-300">
-                    Google session expired for: {staleAccounts.join(", ")}
-                  </p>
-                  <p className="mt-0.5 text-amber-200/70">
-                    Events from this account could not be loaded.{" "}
-                    <button
-                      type="button"
-                      onClick={() => setDashTab("sync")}
-                      className="underline underline-offset-2 hover:text-amber-100"
-                    >
-                      Go to Sync Setup
-                    </button>{" "}
-                    and use <strong>Add another Google account</strong> to re-connect.
-                  </p>
-                </div>
               ) : null}
               {eventsLoadWarnings.length > 0 ? (
                 <ul

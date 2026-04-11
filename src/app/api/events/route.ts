@@ -110,18 +110,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "not_connected" }, { status: 401 });
     }
 
-    const directory = await listCalendarsMerged(s);
-    if (!directory?.length) {
-      return NextResponse.json({ days, events: [], loadErrors: [] });
+    const dir = await listCalendarsMerged(s);
+    if (!dir) {
+      return NextResponse.json({ days, events: [], loadErrors: [], staleAccounts: [] });
     }
 
     // Show events from all source calendars across all mirror rules
     const sourceCalIds = new Set(
       (s.mirrorRules ?? []).flatMap((r) => r.sourceCals)
     );
-    const selectedCals = directory.filter((c) => sourceCalIds.has(c.id));
+    const selectedCals = dir.calendars.filter((c) => sourceCalIds.has(c.id));
     if (!selectedCals.length) {
-      return NextResponse.json({ days, events: [], loadErrors: [] });
+      return NextResponse.json({ days, events: [], loadErrors: [], staleAccounts: dir.staleAccounts });
     }
 
     const timeMin = new Date();
@@ -129,7 +129,8 @@ export async function GET(req: NextRequest) {
     timeMax.setDate(timeMax.getDate() + days);
 
     const loadErrors: string[] = [];
-    const staleAccounts: string[] = []; // emails of accounts whose refresh token is invalid
+    // Start with accounts already detected stale by listCalendarsMerged
+    const staleAccounts: string[] = [...dir.staleAccounts];
     const rows: {
       calendarId: string;
       calendarSummary: string;
