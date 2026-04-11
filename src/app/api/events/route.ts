@@ -71,6 +71,11 @@ function meetingUrlFromEvent(ev: calendar_v3.Schema$Event): string | null {
   return meetingUrlFromLocation(ev.location);
 }
 
+function isInvalidGrant(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.toLowerCase().includes("invalid_grant");
+}
+
 function getSelfRsvp(ev: calendar_v3.Schema$Event): string | null {
   const attendee = ev.attendees?.find((a) => a.self === true);
   return attendee?.responseStatus ?? null;
@@ -124,6 +129,7 @@ export async function GET(req: NextRequest) {
     timeMax.setDate(timeMax.getDate() + days);
 
     const loadErrors: string[] = [];
+    const staleAccounts: string[] = []; // emails of accounts whose refresh token is invalid
     const rows: {
       calendarId: string;
       calendarSummary: string;
@@ -142,50 +148,51 @@ export async function GET(req: NextRequest) {
       isRecurring: boolean;
     }[] = [];
 
-    const settled = await Promise.allSettled(
+    await Promise.allSettled(
       selectedCals.map(async (calInfo) => {
-        const client = await resolveClientForCalendar(s.accounts, calInfo.id);
-        if (!client) {
-          loadErrors.push(
-            `No API client for "${calInfo.summary}" (${calInfo.id}).`
+        try {
+          const client = await resolveClientForCalendar(s.accounts, calInfo.id);
+          if (!client) {
+            loadErrors.push(`No API client for "${calInfo.summary}".`);
+            return;
+          }
+          const items = await listAllEvents(client, calInfo.id, timeMin, timeMax);
+          const visible = items.filter(
+            (ev) =>
+              ev.status !== "cancelled" &&
+              ev.transparency !== "transparent" &&
+              !ev.extendedProperties?.private?.[CALSYNC_SOURCE_KEY]
           );
-          return;
-        }
-        const items = await listAllEvents(client, calInfo.id, timeMin, timeMax);
-        const visible = items.filter(
-          (ev) =>
-            ev.status !== "cancelled" &&
-            ev.transparency !== "transparent" &&
-            !ev.extendedProperties?.private?.[CALSYNC_SOURCE_KEY]
-        );
-        for (const ev of visible) {
-          rows.push({
-            calendarId: calInfo.id,
-            calendarSummary: calInfo.summary,
-            accountEmail: calInfo.accountEmail,
-            id: ev.id ?? null,
-            summary: ev.summary ?? null,
-            start: ev.start ?? null,
-            end: ev.end ?? null,
-            htmlLink: ev.htmlLink ?? null,
-            transparency: ev.transparency ?? null,
-            meetingUrl: meetingUrlFromEvent(ev),
-            declinedBySelf: isEventDeclinedBySelf(ev),
-            selfRsvp: getSelfRsvp(ev),
-            accountId: calInfo.accountId,
-            recurringEventId: ev.recurringEventId ?? null,
-            isRecurring: !!(ev.recurringEventId || (ev.recurrence && ev.recurrence.length > 0)),
-          });
+          for (const ev of visible) {
+            rows.push({
+              calendarId: calInfo.id,
+              calendarSummary: calInfo.summary,
+              accountEmail: calInfo.accountEmail,
+              id: ev.id ?? null,
+              summary: ev.summary ?? null,
+              start: ev.start ?? null,
+              end: ev.end ?? null,
+              htmlLink: ev.htmlLink ?? null,
+              transparency: ev.transparency ?? null,
+              meetingUrl: meetingUrlFromEvent(ev),
+              declinedBySelf: isEventDeclinedBySelf(ev),
+              selfRsvp: getSelfRsvp(ev),
+              accountId: calInfo.accountId,
+              recurringEventId: ev.recurringEventId ?? null,
+              isRecurring: !!(ev.recurringEventId || (ev.recurrence && ev.recurrence.length > 0)),
+            });
+          }
+        } catch (e) {
+          if (isInvalidGrant(e)) {
+            const label = calInfo.accountEmail ?? calInfo.accountId;
+            if (!staleAccounts.includes(label)) staleAccounts.push(label);
+          } else {
+            const msg = e instanceof Error ? e.message : String(e);
+            loadErrors.push(`"${calInfo.summary}": ${msg}`);
+          }
         }
       })
     );
-
-    for (const r of settled) {
-      if (r.status === "rejected") {
-        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        loadErrors.push(msg);
-      }
-    }
 
     rows.sort((a, b) => {
       const ka = rowStartMs(a.start);
@@ -198,6 +205,7 @@ export async function GET(req: NextRequest) {
       days,
       events: rows,
       loadErrors,
+      staleAccounts,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

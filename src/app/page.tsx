@@ -1090,6 +1090,7 @@ export default function Home() {
   const [eventsErr, setEventsErr] = useState<string | null>(null);
   const [eventsRows, setEventsRows] = useState<ListedEvent[]>([]);
   const [eventsLoadWarnings, setEventsLoadWarnings] = useState<string[]>([]);
+  const [staleAccounts, setStaleAccounts] = useState<string[]>([]);
   const [clearMirrorsBusy, setClearMirrorsBusy] = useState<string | null>(null);
   const [clearMirrorsNote, setClearMirrorsNote] = useState<string | null>(null);
 
@@ -1197,6 +1198,7 @@ export default function Home() {
         let j: {
           events?: ListedEvent[];
           loadErrors?: string[];
+          staleAccounts?: string[];
           error?: string;
           message?: string;
         } = {};
@@ -1213,6 +1215,7 @@ export default function Home() {
         }
         setEventsRows(j.events ?? []);
         setEventsLoadWarnings(j.loadErrors ?? []);
+        setStaleAccounts(j.staleAccounts ?? []);
         if (!silent) setEventsErr(null);
       } catch (e) {
         if (e instanceof Error && e.name === "AbortError") return;
@@ -1691,6 +1694,24 @@ export default function Home() {
                 >
                   {eventsErr}
                 </p>
+              ) : null}
+              {staleAccounts.length > 0 ? (
+                <div className="rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-200/90">
+                  <p className="font-medium text-amber-300">
+                    Google session expired for: {staleAccounts.join(", ")}
+                  </p>
+                  <p className="mt-0.5 text-amber-200/70">
+                    Events from this account could not be loaded.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setDashTab("sync")}
+                      className="underline underline-offset-2 hover:text-amber-100"
+                    >
+                      Go to Sync Setup
+                    </button>{" "}
+                    and use <strong>Add another Google account</strong> to re-connect.
+                  </p>
+                </div>
               ) : null}
               {eventsLoadWarnings.length > 0 ? (
                 <ul

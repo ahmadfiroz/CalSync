@@ -78,6 +78,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (msg.toLowerCase().includes("invalid_grant")) {
+      return NextResponse.json({ error: "invalid_grant", message: "Google session expired. Re-connect this account in Sync Setup." }, { status: 401 });
+    }
     return NextResponse.json({ error: "google_api_error", message: msg }, { status: 502 });
   }
 }
