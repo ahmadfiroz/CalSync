@@ -795,13 +795,8 @@ function AgendaEventRow({
             {ev.accountEmail ?? "Google account"}
           </p>
         ) : null}
-      </div>
-      <div className="flex shrink-0 flex-col gap-2 sm:min-w-[10.5rem] sm:items-end">
-        {ev.meetingUrl ? (
-          <MeetingJoinLink url={ev.meetingUrl} mutedOutline={muted} />
-        ) : null}
         {ev.selfRsvp != null && ev.id && ev.accountId && onRsvp ? (
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-col items-start gap-1">
             <div className="inline-flex items-center gap-0.5 rounded-md border border-zinc-800/60 bg-zinc-900/30 p-0.5">
               {(
                 [
@@ -848,7 +843,6 @@ function AgendaEventRow({
                 <button
                   type="button"
                   onClick={() => {
-                    // For instances: use recurringEventId (master); for master events: use own id
                     const masterId = ev.recurringEventId ?? ev.id!;
                     onRsvp(ev.calendarId, ev.id!, ev.accountId!, pendingResponse, "all", masterId);
                     setPendingResponse(null);
@@ -860,6 +854,11 @@ function AgendaEventRow({
               </div>
             ) : null}
           </div>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+        {ev.meetingUrl ? (
+          <MeetingJoinLink url={ev.meetingUrl} mutedOutline={muted} />
         ) : null}
       </div>
     </div>
