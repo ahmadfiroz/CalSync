@@ -1076,6 +1076,8 @@ export default function Home() {
   const [draftRule, setDraftRule] = useState<Partial<DraftRule> | null>(null);
   const [draftStep, setDraftStep] = useState<1 | 2 | 3>(1);
   const [loading, setLoading] = useState(true);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const [syncing, setSyncing] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [lastSync, setLastSync] = useState<{
@@ -1186,6 +1188,17 @@ export default function Home() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    function onClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [userMenuOpen]);
 
   const canSync = mirrorRules.some((r) => r.sourceCals.length > 0);
 
@@ -1595,14 +1608,39 @@ export default function Home() {
           <h1 className="text-2xl font-semibold tracking-tight text-white">
             CalSync
           </h1>
-          {!loading ? (
-            <button
-              type="button"
-              onClick={() => void signOutDashboard()}
-              className="shrink-0 text-xs text-zinc-500 underline-offset-4 hover:text-zinc-300 hover:underline"
-            >
-              Sign out
-            </button>
+          {!loading && me?.email ? (
+            <div ref={userMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setUserMenuOpen((o) => !o)}
+                className="flex items-center gap-2 rounded-full focus:outline-none"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-700 text-sm font-semibold text-white">
+                  {me.email[0]?.toUpperCase() ?? "?"}
+                </span>
+                <span className="hidden max-w-[12rem] truncate text-sm text-zinc-300 sm:block">
+                  {me.email}
+                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 text-zinc-500">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </button>
+              {userMenuOpen ? (
+                <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-lg border border-zinc-800 bg-zinc-950 py-1 shadow-xl">
+                  <div className="border-b border-zinc-800 px-4 py-2.5">
+                    <p className="truncate text-sm font-medium text-zinc-100">{me.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setUserMenuOpen(false); void signOutDashboard(); }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    Sign out
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </header>
