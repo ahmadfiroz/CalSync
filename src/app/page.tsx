@@ -718,7 +718,7 @@ function AgendaEventRow({
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
   viewTimezone?: string;
-  onRsvp?: (calendarId: string, eventId: string, accountId: string, response: "accepted" | "declined" | "tentative", scope: "this" | "all", recurringEventId?: string) => void;
+  onRsvp?: (calendarId: string, eventId: string, accountId: string, response: "accepted" | "declined" | "tentative", scope: "this" | "following" | "all", recurringEventId?: string, eventStartTime?: string) => void;
 }) {
   const [pendingResponse, setPendingResponse] = useState<"accepted" | "declined" | "tentative" | null>(null);
   const isTimed = Boolean(ev.start?.dateTime);
@@ -828,7 +828,7 @@ function AgendaEventRow({
               ))}
             </div>
             {pendingResponse && ev.isRecurring ? (
-              <div className="inline-flex items-center gap-1 rounded border border-zinc-800/60 bg-zinc-900/60 px-1.5 py-1">
+              <div className="inline-flex flex-wrap items-center gap-1 rounded border border-zinc-800/60 bg-zinc-900/60 px-1.5 py-1">
                 <span className="mr-0.5 text-[10px] text-zinc-500">Apply to:</span>
                 <button
                   type="button"
@@ -839,6 +839,18 @@ function AgendaEventRow({
                   className="rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-700/60"
                 >
                   This event
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const masterId = ev.recurringEventId ?? ev.id!;
+                    const startTime = ev.start?.dateTime ?? ev.start?.date ?? undefined;
+                    onRsvp(ev.calendarId, ev.id!, ev.accountId!, pendingResponse, "following", masterId, startTime);
+                    setPendingResponse(null);
+                  }}
+                  className="rounded px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-700/60"
+                >
+                  This and following
                 </button>
                 <button
                   type="button"
@@ -1530,16 +1542,26 @@ export default function Home() {
       eventId: string,
       accountId: string,
       response: "accepted" | "declined" | "tentative",
-      scope: "this" | "all",
-      recurringEventId?: string
+      scope: "this" | "following" | "all",
+      recurringEventId?: string,
+      eventStartTime?: string
     ) => {
-      // Optimistic update: for "all", update every instance in the series
+      // Optimistic update
       setEventsRows((rows) =>
         rows.map((r) => {
-          const matches =
-            scope === "all" && recurringEventId
-              ? r.recurringEventId === recurringEventId && r.calendarId === calendarId
-              : r.id === eventId && r.calendarId === calendarId;
+          let matches = false;
+          if (scope === "all" && recurringEventId) {
+            matches = r.calendarId === calendarId &&
+              (r.recurringEventId === recurringEventId || r.id === recurringEventId);
+          } else if (scope === "following" && recurringEventId && eventStartTime) {
+            const thisStart = new Date(eventStartTime).getTime();
+            const rStart = new Date(r.start?.dateTime ?? r.start?.date ?? 0).getTime();
+            matches = r.calendarId === calendarId &&
+              (r.recurringEventId === recurringEventId || r.id === recurringEventId) &&
+              rStart >= thisStart;
+          } else {
+            matches = r.id === eventId && r.calendarId === calendarId;
+          }
           return matches
             ? { ...r, selfRsvp: response, declinedBySelf: response === "declined" }
             : r;
@@ -1549,7 +1571,7 @@ export default function Home() {
         const res = await fetch("/api/events/rsvp", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ calendarId, eventId, accountId, response, scope, recurringEventId }),
+          body: JSON.stringify({ calendarId, eventId, accountId, response, scope, recurringEventId, eventStartTime }),
         });
         const j = await res.json() as { ok?: boolean; error?: string; message?: string };
         if (!res.ok) throw new Error(j.message || j.error || "RSVP failed");
