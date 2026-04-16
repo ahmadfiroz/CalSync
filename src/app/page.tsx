@@ -8,6 +8,10 @@ import {
   type SVGProps,
 } from "react";
 import { describeLoginError } from "@/lib/login-error";
+import {
+  buildEventsTimeWindow,
+  type EventsRangePreset,
+} from "@/lib/events-window";
 
 type Account = { id: string; email: string | null };
 
@@ -39,7 +43,10 @@ type ListedEvent = {
   meetingUrl: string | null;
   /** True when your RSVP on this copy is Declined. */
   declinedBySelf?: boolean;
+  selfResponseStatus?: "accepted" | "declined" | "tentative" | "needsAction" | null;
 };
+
+type RsvpActionStatus = "accepted" | "declined" | "tentative";
 
 function startOfLocalDay(d: Date): number {
   const x = new Date(d);
@@ -127,7 +134,7 @@ function formatEventSchedule(ev: ListedEvent): string {
   return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
-function IconClock(props: SVGProps<SVGSVGElement>) {
+function IconVideo(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -139,8 +146,8 @@ function IconClock(props: SVGProps<SVGSVGElement>) {
       aria-hidden
       {...props}
     >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 6v6l4 2" />
+      <path d="M23 7v10l-7-5 7-5z" />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
     </svg>
   );
 }
@@ -159,24 +166,6 @@ function IconCalendar(props: SVGProps<SVGSVGElement>) {
     >
       <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
       <path d="M16 2v4M8 2v4M3 10h18" />
-    </svg>
-  );
-}
-
-function IconVideo(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      {...props}
-    >
-      <path d="M23 7v10l-7-5 7-5z" />
-      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
     </svg>
   );
 }
@@ -281,6 +270,30 @@ function formatEventTimeInDay(ev: ListedEvent, groupDayMs: number): string {
   return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
+function rsvpLabelFromStatus(
+  responseStatus: ListedEvent["selfResponseStatus"]
+): string {
+  if (responseStatus === "accepted") return "Attending";
+  if (responseStatus === "tentative") return "Might attend";
+  if (responseStatus === "declined") return "Can't attend";
+  return "RSVP";
+}
+
+function formatEventRsvpLine(
+  responseStatus: ListedEvent["selfResponseStatus"],
+  timeLabel: string
+): string {
+  const rsvpLabel = rsvpLabelFromStatus(responseStatus);
+  if (timeLabel === "All day") return `${rsvpLabel} all day`;
+  return `${rsvpLabel} from ${timeLabel}`;
+}
+
+/** Lowercase am/pm so times read in sentence case (e.g. 8:30 pm – 8:55 pm). */
+function sentenceCaseTimeLabel(s: string): string {
+  if (s === "—" || s === "All day") return s;
+  return s.replace(/\b(A|P)M\b/g, (m) => m.toLowerCase());
+}
+
 /** Short label (mobile), full label (desktop), and accessible name for join links. */
 function meetingJoinInfo(url: string): {
   shortLabel: string;
@@ -379,6 +392,10 @@ function intervalsOverlap(
 
 function agendaEventStableKey(ev: ListedEvent): string {
   return `${ev.calendarId}\0${ev.id ?? "noid"}\0${ev.start?.dateTime ?? ev.start?.date ?? ""}`;
+}
+
+function eventRsvpActionKey(ev: ListedEvent): string {
+  return `${ev.calendarId}\0${ev.id ?? "noid"}`;
 }
 
 /** Events whose time range overlaps another visible (non-ended) agenda event. */
@@ -577,6 +594,84 @@ function MeetingJoinLink({
   );
 }
 
+function RsvpActions({
+  responseStatus,
+  busy,
+  muted,
+  timeLabel,
+  onChange,
+}: {
+  responseStatus: ListedEvent["selfResponseStatus"];
+  busy: boolean;
+  muted?: boolean;
+  timeLabel: string;
+  onChange: (next: RsvpActionStatus) => void;
+}) {
+  const selectedValue: RsvpActionStatus | "" =
+    responseStatus === "accepted" ||
+    responseStatus === "tentative" ||
+    responseStatus === "declined"
+      ? responseStatus
+      : "";
+  const displayLabel = rsvpLabelFromStatus(responseStatus);
+  const labelClass =
+    "pointer-events-none font-medium leading-none text-inherit underline decoration-dotted underline-offset-2";
+  const statusDotClass =
+    responseStatus === "accepted"
+      ? "bg-emerald-500"
+      : responseStatus === "tentative"
+        ? "bg-amber-400"
+        : responseStatus === "declined"
+          ? "bg-rose-500"
+          : muted
+            ? "bg-zinc-700"
+            : "bg-zinc-600";
+  const timeSuffix = timeLabel === "All day" ? " all day" : ` from ${timeLabel}`;
+
+  const rowClass = `text-xs ${muted ? "text-zinc-500" : "text-zinc-400"}`;
+
+  return (
+    <div className={`flex min-w-0 items-center gap-1.5 ${rowClass}`}>
+      <span
+        className="flex w-3 shrink-0 items-center justify-center"
+        aria-hidden="true"
+      >
+        <span
+          className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusDotClass}`}
+        />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <div className="relative inline-block max-w-full align-baseline focus-within:rounded-sm focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-zinc-500">
+            <span className={labelClass}>{displayLabel}</span>
+            <select
+              aria-label="RSVP"
+              disabled={busy}
+              value={selectedValue}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next === "accepted" || next === "tentative" || next === "declined") {
+                  onChange(next);
+                }
+              }}
+              className="absolute inset-0 z-10 min-h-[1.25rem] w-full cursor-pointer appearance-none border-0 bg-transparent p-0 opacity-0 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="" hidden>
+                RSVP
+              </option>
+              <option value="accepted">Accept</option>
+              <option value="tentative">Maybe</option>
+              <option value="declined">Decline</option>
+            </select>
+          </div>
+          <span className="tabular-nums text-inherit">{timeSuffix}</span>
+          {busy ? <span className="text-inherit">&nbsp;Saving...</span> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function listHeadTagText(status: ListHeadStatus): string {
   if (status.type === "live_timed") {
     return `Ends in ${status.remainingMin} min`;
@@ -621,6 +716,8 @@ function AgendaEventRow({
   declinedHidden,
   isFirstInAgenda,
   hasConflict,
+  rsvpBusy,
+  onRsvpChange,
 }: {
   ev: ListedEvent;
   groupDayMs?: number;
@@ -629,11 +726,15 @@ function AgendaEventRow({
   declinedHidden: boolean;
   isFirstInAgenda: boolean;
   hasConflict: boolean;
+  rsvpBusy: boolean;
+  onRsvpChange: (ev: ListedEvent, status: RsvpActionStatus) => void;
 }) {
-  const timeLabel =
+  const timeLabelRaw =
     groupDayMs != null
       ? formatEventTimeInDay(ev, groupDayMs)
       : formatEventSchedule(ev);
+  const timeLabel = sentenceCaseTimeLabel(timeLabelRaw);
+  const rsvpLine = formatEventRsvpLine(ev.selfResponseStatus, timeLabel);
   const headStatus = isListHead ? computeListHeadStatus(ev, now) : null;
   const declined = Boolean(ev.declinedBySelf);
   const muted = declined;
@@ -643,11 +744,6 @@ function AgendaEventRow({
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <EventTitle ev={ev} muted={muted} />
-          {declined ? (
-            <span className="inline-flex shrink-0 items-center rounded-full border border-zinc-600/60 bg-zinc-900/40 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
-              Declined
-            </span>
-          ) : null}
           {hasConflict ? (
             <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95">
               Conflict
@@ -657,41 +753,31 @@ function AgendaEventRow({
             <ListHeadTag status={headStatus} muted={muted} />
           ) : null}
         </div>
-        <div
-          className={`flex max-w-full flex-nowrap items-center gap-x-3 overflow-x-auto text-xs [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${muted ? "text-zinc-600" : "text-zinc-500"}`}
-        >
-          <span className="inline-flex shrink-0 items-center gap-1.5">
-            <IconClock
-              className={`h-3.5 w-3.5 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
-            />
-            <span
-              className={`whitespace-nowrap tabular-nums ${muted ? "text-zinc-500" : "text-zinc-400"}`}
-            >
-              {timeLabel}
-            </span>
-          </span>
-          <span
-            className={`shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
-          >
-            ·
-          </span>
-          <span
-            className={`inline-flex min-w-0 shrink items-center gap-1.5 text-[11px] ${muted ? "text-zinc-600" : "text-zinc-500"}`}
-            title={ev.calendarSummary}
-          >
-            <IconCalendar
-              className={`h-3 w-3 shrink-0 ${muted ? "text-zinc-700" : "text-zinc-600"}`}
-            />
-            <span className="min-w-0 truncate">{ev.calendarSummary}</span>
-          </span>
-        </div>
         {showAccountEmailBelow(ev) ? (
           <p
-            className={`text-[11px] ${muted ? "text-zinc-600/90" : "text-zinc-600"}`}
+            className={`flex min-w-0 items-center gap-1.5 text-xs ${muted ? "text-zinc-500" : "text-zinc-400"}`}
           >
-            {ev.accountEmail ?? "Google account"}
+            <span className="flex w-3 shrink-0 items-center justify-center">
+              <IconCalendar className="h-3 w-3 shrink-0" />
+            </span>
+            <span className="min-w-0">{ev.accountEmail ?? "Google account"}</span>
           </p>
         ) : null}
+        {ev.id ? (
+          <RsvpActions
+            responseStatus={ev.selfResponseStatus}
+            busy={rsvpBusy}
+            muted={muted}
+            timeLabel={timeLabel}
+            onChange={(status) => onRsvpChange(ev, status)}
+          />
+        ) : (
+          <p
+            className={`min-w-0 text-xs tabular-nums leading-relaxed ${muted ? "text-zinc-500" : "text-zinc-400"}`}
+          >
+            {rsvpLine}
+          </p>
+        )}
       </div>
       {ev.meetingUrl ? (
         <div className="flex min-w-0 shrink-0 flex-col items-end self-start pt-0.5 sm:min-w-[9rem] sm:self-center sm:pt-0">
@@ -790,12 +876,9 @@ function groupEventsByLocalDay(rows: ListedEvent[]): {
   return { groups, noDay };
 }
 
-/** Calendar list row often repeats the owning account email; show the extra line only when it adds info. */
+/** Event rows now always show owner email metadata under the title. */
 function showAccountEmailBelow(ev: ListedEvent): boolean {
-  const acct = ev.accountEmail?.trim().toLowerCase() ?? "";
-  const cal = ev.calendarSummary?.trim().toLowerCase() ?? "";
-  if (!acct) return true;
-  if (cal && acct === cal) return false;
+  void ev;
   return true;
 }
 
@@ -921,11 +1004,12 @@ export default function Home() {
   } | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [dashTab, setDashTab] = useState<"sync" | "events">("events");
-  const [eventsDays, setEventsDays] = useState(7);
+  const [eventsRange, setEventsRange] = useState<EventsRangePreset>("7d");
   const [showDeclinedEvents, setShowDeclinedEvents] = useState(false);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsErr, setEventsErr] = useState<string | null>(null);
   const [eventsRows, setEventsRows] = useState<ListedEvent[]>([]);
+  const [rsvpBusyKeys, setRsvpBusyKeys] = useState<Set<string>>(new Set());
   const [eventsLoadWarnings, setEventsLoadWarnings] = useState<string[]>([]);
   const [clearMirrorsBusy, setClearMirrorsBusy] = useState<string | null>(null);
   const [clearMirrorsNote, setClearMirrorsNote] = useState<string | null>(null);
@@ -1008,7 +1092,11 @@ export default function Home() {
         setEventsLoadWarnings([]);
       }
       try {
-        const qs = new URLSearchParams({ days: String(eventsDays) });
+        const { timeMin, timeMax } = buildEventsTimeWindow(eventsRange);
+        const qs = new URLSearchParams({
+          timeMin: timeMin.toISOString(),
+          timeMax: timeMax.toISOString(),
+        });
         const r = await fetch(`/api/events?${qs.toString()}`, { signal });
         const raw = await r.text();
         let j: {
@@ -1042,7 +1130,7 @@ export default function Home() {
         if (!silent) setEventsLoading(false);
       }
     },
-    [eventsDays, me?.connected]
+    [eventsRange, me?.connected]
   );
 
   const [eventsNowTick, setEventsNowTick] = useState(0);
@@ -1157,7 +1245,7 @@ export default function Home() {
     const ac = new AbortController();
     void loadEvents({ silent: false, signal: ac.signal });
     return () => ac.abort();
-  }, [dashTab, eventsDays, me?.connected, savedSyncGroupKey, loadEvents]);
+  }, [dashTab, eventsRange, me?.connected, savedSyncGroupKey, loadEvents]);
 
   useEffect(() => {
     if (dashTab !== "events" || !me?.connected) return;
@@ -1290,6 +1378,76 @@ export default function Home() {
     }
   };
 
+  const setEventRsvpLocally = useCallback(
+    (
+      ev: ListedEvent,
+      nextStatus: ListedEvent["selfResponseStatus"] | null | undefined
+    ) => {
+      setEventsRows((prev) =>
+        prev.map((row) => {
+          if (!row.id || !ev.id) return row;
+          if (row.calendarId !== ev.calendarId || row.id !== ev.id) return row;
+          return {
+            ...row,
+            selfResponseStatus: nextStatus ?? row.selfResponseStatus ?? null,
+            declinedBySelf:
+              (nextStatus ?? row.selfResponseStatus ?? null) === "declined",
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const updateRsvp = useCallback(
+    async (ev: ListedEvent, nextStatus: RsvpActionStatus) => {
+      if (!ev.id) return;
+      const actionKey = eventRsvpActionKey(ev);
+      const previousStatus = ev.selfResponseStatus ?? null;
+
+      setEventsErr(null);
+      setRsvpBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.add(actionKey);
+        return next;
+      });
+      setEventRsvpLocally(ev, nextStatus);
+
+      try {
+        const r = await fetch("/api/events/rsvp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            calendarId: ev.calendarId,
+            eventId: ev.id,
+            responseStatus: nextStatus,
+          }),
+        });
+        const j = (await r.json().catch(() => ({}))) as {
+          message?: string;
+          error?: string;
+          responseStatus?: ListedEvent["selfResponseStatus"];
+        };
+        if (!r.ok) {
+          throw new Error(j.message || j.error || "Could not update RSVP");
+        }
+        setEventRsvpLocally(ev, j.responseStatus ?? nextStatus);
+      } catch (e) {
+        setEventRsvpLocally(ev, previousStatus);
+        setEventsErr(
+          e instanceof Error ? e.message : "Could not update RSVP"
+        );
+      } finally {
+        setRsvpBusyKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(actionKey);
+          return next;
+        });
+      }
+    },
+    [setEventRsvpLocally]
+  );
+
   const displayError = useMemo(
     () => urlError || loadErr,
     [urlError, loadErr]
@@ -1388,8 +1546,10 @@ export default function Home() {
                       Time range
                     </span>
                     <select
-                      value={eventsDays}
-                      onChange={(e) => setEventsDays(Number(e.target.value))}
+                      value={eventsRange}
+                      onChange={(e) =>
+                        setEventsRange(e.target.value as EventsRangePreset)
+                      }
                       className="min-w-[11rem] w-full max-w-xs cursor-pointer appearance-none rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-10 text-sm text-zinc-100 focus:border-zinc-600 focus:outline-none"
                       style={{
                         backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
@@ -1398,9 +1558,9 @@ export default function Home() {
                         backgroundRepeat: "no-repeat",
                       }}
                     >
-                      <option value={7}>Next 7 days</option>
-                      <option value={30}>Next 30 days</option>
-                      <option value={90}>Next 90 days</option>
+                      <option value="7d">Next 7 days</option>
+                      <option value="this-month">This month</option>
+                      <option value="next-month">Next month</option>
                     </select>
                   </label>
                   <DeclinedEventsSwitch
@@ -1466,6 +1626,8 @@ export default function Home() {
                             hasConflict={conflictKeys.has(
                               agendaEventStableKey(ev)
                             )}
+                            rsvpBusy={rsvpBusyKeys.has(eventRsvpActionKey(ev))}
+                            onRsvpChange={updateRsvp}
                           />
                         ))}
                       </ul>
@@ -1496,6 +1658,8 @@ export default function Home() {
                             hasConflict={conflictKeys.has(
                               agendaEventStableKey(ev)
                             )}
+                            rsvpBusy={rsvpBusyKeys.has(eventRsvpActionKey(ev))}
+                            onRsvpChange={updateRsvp}
                           />
                         ))}
                       </ul>

@@ -18,13 +18,24 @@ export type SyncResult = {
   };
 };
 
+export type SelfResponseStatus = NonNullable<
+  calendar_v3.Schema$EventAttendee["responseStatus"]
+>;
+
+/** RSVP for the linked account on this event copy, when present. */
+export function getSelfResponseStatus(
+  ev: calendar_v3.Schema$Event
+): SelfResponseStatus | null {
+  const attendees = ev.attendees;
+  if (!attendees?.length) return null;
+  const self = attendees.find((a) => a.self === true);
+  if (!self?.responseStatus) return null;
+  return self.responseStatus;
+}
+
 /** True when this calendar copy is an invitation you declined (RSVP). */
 export function isEventDeclinedBySelf(ev: calendar_v3.Schema$Event): boolean {
-  const attendees = ev.attendees;
-  if (!attendees?.length) return false;
-  return attendees.some(
-    (a) => a.self === true && a.responseStatus === "declined"
-  );
+  return getSelfResponseStatus(ev) === "declined";
 }
 
 function classifySkip(

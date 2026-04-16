@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.4] - 2026-04-17
+
+### Added
+
+- **`GET /api/events?timeMin=<ISO>&timeMax=<ISO>`** — explicit event window (both required together). Enforces a maximum span (~40 days), reasonable past/future bounds, and returns `timeMin` / `timeMax` on the JSON response. Legacy **`days`** (1–30, rolling from server time) remains for older callers.
+- **`POST /api/events/rsvp`** — session-authenticated RSVP updates (accept, tentative, decline) for events that include attendee data; patches the event via Google Calendar with `sendUpdates: none`.
+- **`selfResponseStatus`** on `GET /api/events` payloads and **`getSelfResponseStatus`** in `src/lib/sync.ts` so the UI can show your response per event copy.
+
+### Changed
+
+- **Upcoming events — time range** — presets are **Next 7 days**, **This month** (now through end of current calendar month), and **Next month** (full following month), computed in the **browser’s local timezone** and requested via `timeMin` / `timeMax` (replacing fixed 7 / 30 / 90 rolling-day options).
+- **Upcoming events — UI** — inline RSVP control (overlay select) with status dot and labels (Attending / Might attend / Can’t attend / RSVP); optimistic updates with rollback on error. Event rows emphasize account line with calendar icon; time strings use sentence-case am/pm; removed the separate “Declined” pill in favor of RSVP state.
+
 ## [0.3.3] - 2026-04-10
 
 ### Added

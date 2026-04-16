@@ -143,12 +143,12 @@ Ensure `node`/`npm` are on `PATH` for the service user, or use full paths in `Ex
 
 ## Using the dashboard
 
-- **Upcoming events** — Next 7, 30, or 90 days for calendars in your **saved** sync group. Shows schedule, free transparency, optional Google Meet/Zoom/FaceTime links, and a link to Google Calendar. Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
+- **Upcoming events** — **Next 7 days**, **This month** (now through the end of the current calendar month), or **Next month** (full following calendar month), using your browser’s local timezone, for calendars in your **saved** sync group. Shows schedule, free transparency, optional Google Meet/Zoom/FaceTime links, and a link to Google Calendar. **RSVP** — when Google returns attendee data for an event, you can accept, tentatively accept, or decline from the row (updates sync to Calendar). Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
 - **Sync setup** — **Connected Google accounts** (add/remove, disconnect all). **Calendars in sync group** — choose at least two writable calendars; grouped by account with the **primary** calendar first. **Add calendar** creates a new calendar or adds by ID. **Save selection**, then **Run sync now**, or rely on push and optional polling (`CALSYNC_AUTO_SYNC_INTERVAL_SEC`). **Last sync** shows mirror counts and skip reasons.
 
 Tokens and preferences live in **Supabase**; secure and back up that database.
 
-**API (session-authenticated):** `GET /api/events?days=30` (1–90), `POST /api/sync`, `POST /api/calendars/clear-mirrors` with `{ "calendarId": "<id>" }`. Event objects can include `declinedBySelf`.
+**API (session-authenticated):** `GET /api/events?timeMin=<ISO>&timeMax=<ISO>` (both required together; max span about 40 days), or legacy `GET /api/events?days=30` (1–30 rolling window from server time). Response includes `timeMin` / `timeMax` echo. `POST /api/sync`, `POST /api/calendars/clear-mirrors` with `{ "calendarId": "<id>" }`, `POST /api/events/rsvp` with `{ "calendarId": "<id>", "eventId": "<id>", "responseStatus": "accepted" | "tentative" | "declined" }`. Event objects can include `declinedBySelf` and `selfResponseStatus`.
 
 ## Scripts
 
