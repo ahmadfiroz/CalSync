@@ -128,13 +128,17 @@ export async function GET(req: NextRequest) {
       (await readStoreForUser(targetUserId)) ??
       ({ ...EMPTY_STORE } satisfies CalSyncStore);
 
-    const newAcc = { id: randomUUID(), refreshToken: rt, email };
-
     let accounts = [...prev.accounts];
-    if (email) {
-      accounts = accounts.filter((a) => a.email !== email);
+    const existingIdx = email ? accounts.findIndex((a) => a.email === email) : -1;
+    let newAcc: { id: string; refreshToken: string; email?: string };
+    if (existingIdx >= 0) {
+      // Re-auth: preserve the existing account ID so mirror rules stay valid
+      newAcc = { ...accounts[existingIdx], refreshToken: rt };
+      accounts[existingIdx] = newAcc;
+    } else {
+      newAcc = { id: randomUUID(), refreshToken: rt, email };
+      accounts.push(newAcc);
     }
-    accounts.push(newAcc);
 
     const extraIdentityKeys: string[] = [];
     if (!email?.trim() && typeof profile.id === "string") {

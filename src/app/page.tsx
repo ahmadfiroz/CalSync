@@ -1166,11 +1166,54 @@ export default function Home() {
           cj.message || cj.error || "Could not load calendars"
         );
       }
-      setCalendars(cj.calendars ?? []);
+      const fetchedCalendars = cj.calendars ?? [];
+      setCalendars(fetchedCalendars);
       if (cj.staleAccounts?.length) setStaleAccounts(cj.staleAccounts);
       if (cfgr.ok) {
         const cfg = (await cfgr.json()) as { mirrorRules?: MirrorRule[] };
-        setMirrorRules(cfg.mirrorRules ?? []);
+        const rawRules = cfg.mirrorRules ?? [];
+        const accounts = m.accounts ?? [];
+
+        // Auto-heal rules whose sourceAccountId/destAccountId became stale
+        // (e.g. after re-auth generated a new UUID). Infer correct account
+        // from which account currently owns the referenced calendars.
+        const healedRules = rawRules.map((rule) => {
+          const srcOk = accounts.some((a) => a.id === rule.sourceAccountId);
+          const dstOk = accounts.some((a) => a.id === rule.destAccountId);
+          if (srcOk && dstOk) return rule;
+
+          let newSourceId = rule.sourceAccountId;
+          if (!srcOk) {
+            for (const calId of rule.sourceCals) {
+              const ownerAccountId = fetchedCalendars.find((c) => c.id === calId)?.accountId;
+              if (ownerAccountId && accounts.some((a) => a.id === ownerAccountId)) {
+                newSourceId = ownerAccountId;
+                break;
+              }
+            }
+          }
+
+          let newDestId = rule.destAccountId;
+          if (!dstOk && rule.destCalId !== "__auto__") {
+            const ownerAccountId = fetchedCalendars.find((c) => c.id === rule.destCalId)?.accountId;
+            if (ownerAccountId && accounts.some((a) => a.id === ownerAccountId)) {
+              newDestId = ownerAccountId;
+            }
+          }
+
+          return { ...rule, sourceAccountId: newSourceId, destAccountId: newDestId };
+        });
+
+        setMirrorRules(healedRules);
+
+        // Silently persist healed rules if any IDs changed
+        if (healedRules.some((r, i) => r !== rawRules[i])) {
+          void fetch("/api/config", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mirrorRules: healedRules }),
+          });
+        }
       }
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
