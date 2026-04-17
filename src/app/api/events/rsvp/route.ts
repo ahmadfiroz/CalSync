@@ -4,6 +4,7 @@ import { readStoreForUser } from "@/lib/store-db";
 import { resolveClientForCalendar } from "@/lib/accounts";
 import { requireUserId } from "@/lib/api-session";
 import { getSelfResponseStatus } from "@/lib/sync";
+import type { calendar_v3 } from "@googleapis/calendar";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,25 @@ function normalizeStatus(v: unknown): AllowedResponseStatus | null {
     return v;
   }
   return null;
+}
+
+function accountEmailSet(accounts: { email?: string | null }[]): Set<string> {
+  return new Set(
+    accounts
+      .map((a) => a.email?.trim().toLowerCase())
+      .filter((x): x is string => Boolean(x))
+  );
+}
+
+function eventOwnedByUser(
+  event: calendar_v3.Schema$Event,
+  accountEmails: Set<string>
+): boolean {
+  if (event.organizer?.self === true || event.creator?.self === true) return true;
+  const organizerEmail = event.organizer?.email?.trim().toLowerCase();
+  if (organizerEmail && accountEmails.has(organizerEmail)) return true;
+  const creatorEmail = event.creator?.email?.trim().toLowerCase();
+  return Boolean(creatorEmail && accountEmails.has(creatorEmail));
 }
 
 export async function POST(req: Request) {
@@ -59,7 +79,8 @@ export async function POST(req: Request) {
       maxAttendees: 250,
     });
     const event = eventRes.data;
-    if (!event.attendees?.length) {
+    const accountEmails = accountEmailSet(store.accounts);
+    if (!event.attendees?.length && !eventOwnedByUser(event, accountEmails)) {
       return NextResponse.json(
         {
           error: "rsvp_not_supported",
@@ -69,17 +90,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const accountEmails = new Set(
-      store.accounts
-        .map((a) => a.email?.trim().toLowerCase())
-        .filter((x): x is string => Boolean(x))
-    );
-    const attendeeIndex = event.attendees.findIndex(
+    const attendees = (event.attendees ?? []).map((a) => ({ ...a }));
+    const attendeeIndex = attendees.findIndex(
       (a) =>
         a.self === true ||
         (a.email ? accountEmails.has(a.email.trim().toLowerCase()) : false)
     );
-    if (attendeeIndex < 0) {
+    const ownsEvent = eventOwnedByUser(event, accountEmails);
+    if (attendeeIndex < 0 && !ownsEvent) {
       return NextResponse.json(
         {
           error: "rsvp_not_supported",
@@ -88,12 +106,23 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-
-    const attendees = event.attendees.map((a) => ({ ...a }));
-    attendees[attendeeIndex] = {
-      ...attendees[attendeeIndex],
-      responseStatus,
-    };
+    if (attendeeIndex >= 0) {
+      attendees[attendeeIndex] = {
+        ...attendees[attendeeIndex],
+        responseStatus,
+      };
+    } else {
+      const fallbackEmail =
+        event.organizer?.email ??
+        event.creator?.email ??
+        store.accounts.find((a) => Boolean(a.email?.trim()))?.email ??
+        undefined;
+      attendees.push({
+        email: fallbackEmail,
+        self: true,
+        responseStatus,
+      });
+    }
 
     const patched = await cal.events.patch({
       calendarId,

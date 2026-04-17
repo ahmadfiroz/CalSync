@@ -2,6 +2,9 @@
   "name": "calsync",
   "version": "0.3.4",
   "private": true,
+  "engines": {
+    "node": ">=20.9.0 <23.0.0 || >=24.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:webpack": "next dev --webpack",

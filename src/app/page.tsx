@@ -44,6 +44,7 @@ type ListedEvent = {
   /** True when your RSVP on this copy is Declined. */
   declinedBySelf?: boolean;
   selfResponseStatus?: "accepted" | "declined" | "tentative" | "needsAction" | null;
+  canRsvp?: boolean;
 };
 
 type RsvpActionStatus = "accepted" | "declined" | "tentative";
@@ -411,16 +412,22 @@ function computeConflictKeys(events: ListedEvent[]): Set<string> {
     if (!iv) continue;
     withIv.push({ ev, key: agendaEventStableKey(ev), iv });
   }
+  withIv.sort((a, b) => {
+    if (a.iv.start !== b.iv.start) return a.iv.start - b.iv.start;
+    return a.iv.end - b.iv.end;
+  });
+
   const conflicted = new Set<string>();
-  for (let i = 0; i < withIv.length; i++) {
-    for (let j = i + 1; j < withIv.length; j++) {
-      if (!intervalsOverlap(withIv[i].iv, withIv[j].iv)) continue;
-      if (withIv[i].ev.declinedBySelf || withIv[j].ev.declinedBySelf) {
-        continue;
-      }
-      conflicted.add(withIv[i].key);
-      conflicted.add(withIv[j].key);
+  let active: typeof withIv = [];
+  for (const cur of withIv) {
+    active = active.filter((item) => item.iv.end > cur.iv.start);
+    for (const item of active) {
+      if (!intervalsOverlap(item.iv, cur.iv)) continue;
+      if (item.ev.declinedBySelf || cur.ev.declinedBySelf) continue;
+      conflicted.add(item.key);
+      conflicted.add(cur.key);
     }
+    active.push(cur);
   }
   return conflicted;
 }

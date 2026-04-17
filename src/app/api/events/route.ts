@@ -6,7 +6,6 @@ import { resolveClientForCalendar } from "@/lib/accounts";
 import { CALSYNC_SOURCE_KEY } from "@/lib/constants";
 import {
   getSelfResponseStatus,
-  isEventDeclinedBySelf,
   listAllEvents,
 } from "@/lib/sync";
 import { listCalendarsMerged } from "@/lib/calendar-directory";
@@ -234,6 +233,37 @@ function rowStartMs(
   return 0;
 }
 
+function userOwnsEvent(
+  ev: calendar_v3.Schema$Event,
+  accountEmails: Set<string>
+): boolean {
+  if (ev.organizer?.self === true || ev.creator?.self === true) return true;
+  const organizerEmail = ev.organizer?.email?.trim().toLowerCase();
+  if (organizerEmail && accountEmails.has(organizerEmail)) return true;
+  const creatorEmail = ev.creator?.email?.trim().toLowerCase();
+  return Boolean(creatorEmail && accountEmails.has(creatorEmail));
+}
+
+function selfResponseStatusForAccount(
+  ev: calendar_v3.Schema$Event,
+  accountEmails: Set<string>
+): string | null {
+  const bySelf = getSelfResponseStatus(ev);
+  if (bySelf) return bySelf;
+  const byEmail = (ev.attendees ?? []).find(
+    (a) =>
+      typeof a.email === "string" &&
+      accountEmails.has(a.email.trim().toLowerCase()) &&
+      Boolean(a.responseStatus)
+  );
+  if (byEmail?.responseStatus) return byEmail.responseStatus;
+  if (userOwnsEvent(ev, accountEmails)) {
+    // Owner-created events without attendee rows are effectively accepted by self.
+    return "accepted";
+  }
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const parsed = parseEventsWindow(req);
   if (!parsed.ok) {
@@ -276,6 +306,11 @@ export async function GET(req: NextRequest) {
     }
 
     const loadErrors: string[] = [];
+    const linkedAccountEmails = new Set(
+      s.accounts
+        .map((a) => a.email?.trim().toLowerCase())
+        .filter((x): x is string => Boolean(x))
+    );
     const rows: {
       calendarId: string;
       calendarSummary: string;
@@ -289,6 +324,7 @@ export async function GET(req: NextRequest) {
       meetingUrl: string | null;
       declinedBySelf: boolean;
       selfResponseStatus: string | null;
+      canRsvp: boolean;
     }[] = [];
 
     const settled = await Promise.allSettled(
@@ -308,6 +344,18 @@ export async function GET(req: NextRequest) {
             !ev.extendedProperties?.private?.[CALSYNC_SOURCE_KEY]
         );
         for (const ev of visible) {
+          const attendees = ev.attendees ?? [];
+          const hasSelfAttendee = attendees.some(
+            (a) =>
+              a.self === true ||
+              (typeof a.email === "string" &&
+                linkedAccountEmails.has(a.email.trim().toLowerCase()))
+          );
+          const canRsvp = hasSelfAttendee || userOwnsEvent(ev, linkedAccountEmails);
+          const selfResponseStatus = selfResponseStatusForAccount(
+            ev,
+            linkedAccountEmails
+          );
           rows.push({
             calendarId: calInfo.id,
             calendarSummary: calInfo.summary,
@@ -319,8 +367,9 @@ export async function GET(req: NextRequest) {
             htmlLink: ev.htmlLink ?? null,
             transparency: ev.transparency ?? null,
             meetingUrl: meetingUrlFromEvent(ev),
-            declinedBySelf: isEventDeclinedBySelf(ev),
-            selfResponseStatus: getSelfResponseStatus(ev),
+            declinedBySelf: selfResponseStatus === "declined",
+            selfResponseStatus,
+            canRsvp,
           });
         }
       })
