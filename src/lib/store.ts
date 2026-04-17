@@ -32,6 +32,8 @@ export type CalSyncStore = {
   accounts: ConnectedAccount[];
   mirrorRules: MirrorRule[];
   calendarWatchChannels?: CalendarWatchChannel[];
+  /** Calendar ID to pre-select when creating a new event. */
+  defaultCalendarId?: string;
 };
 
 export const EMPTY_STORE: CalSyncStore = {
@@ -116,6 +118,7 @@ export function normalizeParsed(parsed: unknown): CalSyncStore {
         accounts: normalizeAccounts(p.accounts as unknown[]),
         mirrorRules: normalizeMirrorRules(p.mirrorRules),
         calendarWatchChannels: normalizeWatchChannels(p.calendarWatchChannels),
+        defaultCalendarId: typeof p.defaultCalendarId === "string" ? p.defaultCalendarId : undefined,
       };
     }
 

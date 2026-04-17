@@ -25,7 +25,10 @@ export async function GET() {
   if (!isStoreConnected(s)) {
     return NextResponse.json({ error: "not_connected" }, { status: 401 });
   }
-  return NextResponse.json({ mirrorRules: s.mirrorRules ?? [] });
+  return NextResponse.json({
+    mirrorRules: s.mirrorRules ?? [],
+    defaultCalendarId: s.defaultCalendarId ?? null,
+  });
 }
 
 export async function PUT(req: NextRequest) {
@@ -115,7 +118,7 @@ export async function PUT(req: NextRequest) {
     }
   }
 
-  await writeStoreForUser(userId, { ...s, mirrorRules: rules, calendarWatchChannels });
+  await writeStoreForUser(userId, { ...s, mirrorRules: rules, calendarWatchChannels, defaultCalendarId: s.defaultCalendarId });
 
   void performFullSyncCoalescedForUser(userId);
 
@@ -124,4 +127,30 @@ export async function PUT(req: NextRequest) {
     mirrorRules: rules,
     calendarPush: Boolean(calendarWatchChannels?.length),
   });
+}
+
+/** PATCH /api/config — update lightweight preferences without triggering a full sync. */
+export async function PATCH(req: NextRequest) {
+  const userId = await requireUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const s = await readStoreForUser(userId);
+  if (!isStoreConnected(s)) {
+    return NextResponse.json({ error: "not_connected" }, { status: 401 });
+  }
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+  const b = body as Record<string, unknown>;
+  if ("defaultCalendarId" in b) {
+    const val = b.defaultCalendarId;
+    const defaultCalendarId = typeof val === "string" && val ? val : undefined;
+    await writeStoreForUser(userId, { ...s, defaultCalendarId });
+    return NextResponse.json({ ok: true, defaultCalendarId: defaultCalendarId ?? null });
+  }
+  return NextResponse.json({ error: "nothing_to_update" }, { status: 400 });
 }
