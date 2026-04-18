@@ -4,14 +4,6 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
-  if (path.startsWith("/_next") || path.startsWith("/favicon")) {
-    return NextResponse.next();
-  }
-
-  if (path.startsWith("/api/auth/")) {
-    return NextResponse.next();
-  }
-
   const tokenEarly = request.cookies.get(SESSION_COOKIE)?.value;
   let sessionUserIdEarly: string | null = null;
   try {
@@ -25,9 +17,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/", request.url));
   }
   if (path === "/login") {
-    return NextResponse.next();
-  }
-  if (path.startsWith("/api/webhooks/") || path.startsWith("/api/cron/")) {
     return NextResponse.next();
   }
 

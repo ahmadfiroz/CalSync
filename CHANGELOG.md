@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.4] - 2026-04-17
+
+### Added
+
+- **`GET /api/events?timeMin=<ISO>&timeMax=<ISO>`** — explicit event window (both required together). Enforces a maximum span (~40 days), reasonable past/future bounds, and returns `timeMin` / `timeMax` on the JSON response. Legacy **`days`** (1–30, rolling from server time) remains for older callers.
+- **`POST /api/events/rsvp`** — session-authenticated RSVP updates (accept, tentative, decline) for events that include attendee data; patches the event via Google Calendar with `sendUpdates: none`.
+- **`selfResponseStatus`** on `GET /api/events` payloads and **`getSelfResponseStatus`** in `src/lib/sync.ts` so the UI can show your response per event copy.
+
+### Changed
+
+- **Upcoming events — time range** — presets are **Next 7 days**, **This month** (now through end of current calendar month), and **Next month** (full following month), computed in the **browser’s local timezone** and requested via `timeMin` / `timeMax` (replacing fixed 7 / 30 / 90 rolling-day options).
+- **Upcoming events — UI** — inline RSVP control (overlay select) with status dot and labels (Attending / Might attend / Can’t attend / RSVP); optimistic updates with rollback on error. Event rows emphasize account line with calendar icon; time strings use sentence-case am/pm; removed the separate “Declined” pill in favor of RSVP state.
+
+## [0.3.3] - 2026-04-10
+
+### Added
+
+- FaceTime join-link support in event extraction and UI labels, including `facetime://` links and `facetime.apple.com` URLs.
+- Description/notes meeting-link fallback parsing in `GET /api/events` so join links still surface when providers only embed them outside `conferenceData`.
+
+### Changed
+
+- Expanded event URL normalization/parsing for escaped slashes and HTML entities before matching meeting links.
+- Dashboard and login interaction polish with pointer cursor treatment for clickable controls and explicit not-allowed cursor states for disabled actions.
+- README dashboard docs now mention Google Meet, Zoom, and FaceTime links in upcoming events.
+
+## [0.3.2] - 2026-04-09
+
+### Added
+
+- **Conflict badges** on the agenda: overlapping timed or all-day busy intervals are flagged with an amber “Conflict” pill; pairs where either side is a self-declined RSVP are ignored.
+- **`describeLoginError`** (`src/lib/login-error.ts`): maps OAuth query errors (`invalid_state`, `access_denied`, `unauthorized_client`, `invalid_grant`, missing Google client env) to multi-line guidance on the login page and when the dashboard reads `?error=`.
+
+### Changed
+
+- **Meeting join links**: video icon, responsive labels (short on small screens, full text from `sm`), and clearer `aria-label`s; primary vs outline styling aligned with list-head emphasis.
+- **Copy**: login, dashboard disconnected state, and footers now state that tokens and preferences live in the **instance database** (not only the device) and add an **experimental / use at your own risk** notice; removed outdated `.data/store.json` wording.
+- **Layout**: slightly tighter main padding and gaps on small viewports; error alerts use `whitespace-pre-line` for multi-line messages.
+
 ## [0.3.1] - 2026-04-09
 
 ### Fixed

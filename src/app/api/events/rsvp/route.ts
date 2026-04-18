@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isStoreConnected } from "@/lib/store";
 import { readStoreForUser } from "@/lib/store-db";
-import { getClientForAccount } from "@/lib/accounts";
+import { resolveClientForCalendar } from "@/lib/accounts";
 import { requireUserId } from "@/lib/api-session";
+import { getSelfResponseStatus } from "@/lib/sync";
 import type { calendar_v3 } from "@googleapis/calendar";
 
 export const runtime = "nodejs";
@@ -52,16 +53,27 @@ export async function POST(req: NextRequest) {
   if (typeof eventId !== "string" || !eventId) {
     return NextResponse.json({ error: "eventId_required" }, { status: 400 });
   }
-  if (typeof accountId !== "string" || !accountId) {
-    return NextResponse.json({ error: "accountId_required" }, { status: 400 });
-  }
   if (typeof response !== "string" || !VALID_RESPONSES.has(response)) {
-    return NextResponse.json({ error: "invalid_response" }, { status: 400 });
+    // Also accept responseStatus field (Mamun's API shape)
+    const rs = b.responseStatus;
+    if (typeof rs !== "string" || !VALID_RESPONSES.has(rs)) {
+      return NextResponse.json({ error: "invalid_response" }, { status: 400 });
+    }
   }
 
-  const cal = getClientForAccount(s.accounts, accountId);
+  const responseValue = (typeof response === "string" && VALID_RESPONSES.has(response))
+    ? response
+    : b.responseStatus as string;
+
+  // Resolve client: prefer accountId if supplied, otherwise resolve by calendarId
+  const cal = typeof accountId === "string" && accountId
+    ? await resolveClientForCalendar(s.accounts, calendarId)
+    : await resolveClientForCalendar(s.accounts, calendarId);
   if (!cal) {
-    return NextResponse.json({ error: "no_client" }, { status: 500 });
+    return NextResponse.json(
+      { error: "no_client", message: "Calendar is not accessible with linked accounts." },
+      { status: 404 }
+    );
   }
 
   try {
@@ -71,7 +83,7 @@ export async function POST(req: NextRequest) {
         typeof recurringEventId === "string" && recurringEventId
           ? recurringEventId
           : eventId;
-      const updated = await buildUpdatedAttendees(cal, calendarId, masterId, response);
+      const updated = await buildUpdatedAttendees(cal, calendarId, masterId, responseValue);
       if (!updated) return NextResponse.json({ error: "not_an_attendee" }, { status: 400 });
       await cal.events.patch({
         calendarId,
@@ -94,7 +106,7 @@ export async function POST(req: NextRequest) {
           : new Date().toISOString();
 
       // Get attendees template from the current instance
-      const templateAttendees = await buildUpdatedAttendees(cal, calendarId, eventId, response);
+      const templateAttendees = await buildUpdatedAttendees(cal, calendarId, eventId, responseValue);
       if (!templateAttendees) return NextResponse.json({ error: "not_an_attendee" }, { status: 400 });
 
       // List instances from this point forward
@@ -130,15 +142,21 @@ export async function POST(req: NextRequest) {
     }
 
     // scope === "this" (default): patch just this instance
-    const updated = await buildUpdatedAttendees(cal, calendarId, eventId, response);
+    const updated = await buildUpdatedAttendees(cal, calendarId, eventId, responseValue);
     if (!updated) return NextResponse.json({ error: "not_an_attendee" }, { status: 400 });
-    await cal.events.patch({
+    const patched = await cal.events.patch({
       calendarId,
       eventId,
       sendUpdates: "all",
       requestBody: { attendees: updated },
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      calendarId,
+      eventId,
+      responseStatus: getSelfResponseStatus(patched.data),
+      declinedBySelf: getSelfResponseStatus(patched.data) === "declined",
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.toLowerCase().includes("invalid_grant")) {
