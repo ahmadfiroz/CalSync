@@ -2165,7 +2165,7 @@ export default function Home() {
                 </p>
               ) : (
                 <div className="space-y-10">
-                  {expandedGrouped.groups.map((group) => (
+                  {expandedGrouped.groups.map((group, gi) => (
                     <div key={group.dayMs}>
                       <h3 className="sticky top-0 z-10 -mx-1 mb-3 border-b border-zinc-800/60 bg-[var(--background)] px-1 py-2 text-xs font-medium tracking-wide text-zinc-500">
                         {group.label}
