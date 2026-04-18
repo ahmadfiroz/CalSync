@@ -1,5 +1,10 @@
 # CalSync
 
+<div align="center">
+  <img src="public/logo.png" alt="CalSync Logo" width="120" />
+</div>
+
+
 Self-hosted Google Calendar helper that mirrors **Busy** blocks across accounts using explicit **mirror rules**. Each rule directs busy events from one or more source calendars (on any connected Google account) into a destination calendar on a different account — so the destination account always shows when you are busy, without exposing event details. OAuth refresh tokens and mirror rules are stored per user in **Supabase** (Postgres). The app is **multi-user**: each Google sign-in gets an isolated CalSync account unless that Google identity was already linked (including via “Add another Google account”).
 
 **Latest release:** v0.3.1 (2026-04-09). See [Changelog](#changelog). **Release history:** [`CHANGELOG.md`](CHANGELOG.md).
