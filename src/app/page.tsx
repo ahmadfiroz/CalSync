@@ -173,24 +173,6 @@ function formatEventSchedule(ev: ListedEvent, tz?: string): string {
   return `${start.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...tzOpt })} – ${end.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...tzOpt })}`;
 }
 
-function IconVideo(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      {...props}
-    >
-      <path d="M23 7v10l-7-5 7-5z" />
-      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-    </svg>
-  );
-}
-
 function IconCalendar(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
