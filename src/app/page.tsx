@@ -2218,7 +2218,7 @@ export default function Home() {
                               Boolean(ev.declinedBySelf) && !showDeclinedEvents
                             }
                             isFirstInAgenda={
-                              eventsGrouped.groups.length === 0 && ni === 0
+                              expandedGrouped.groups.length === 0 && ni === 0
                             }
                             viewTimezone={viewTimezone || undefined}
                             onRsvp={handleRsvp}
