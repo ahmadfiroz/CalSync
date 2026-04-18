@@ -1,6 +1,6 @@
 {
   "name": "calsync",
-  "version": "0.3.4",
+  "version": "0.3.6",
   "private": true,
   "engines": {
     "node": ">=20.9.0 <23.0.0 || >=24.0.0"

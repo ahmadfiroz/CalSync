@@ -15,6 +15,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CalSync",
   description: "Google Calendar busy-time sync across calendars in your group.",
+  /** Stops iOS Safari from auto-linking plain-text emails (mailto + underline). */
+  formatDetection: {
+    email: false,
+  },
 };
 
 export default function RootLayout({

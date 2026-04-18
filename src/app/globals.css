@@ -18,6 +18,12 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
+/* iOS Safari may still wrap detected emails; match surrounding text, no underline */
+a[x-apple-data-detectors] {
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
 button,
 a[href],
 input[type="button"],

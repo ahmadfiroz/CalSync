@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.6] - 2026-04-17
+
+### Changed
+
+- **Agenda grouping** — day sections use the **expanded** event list so dates stay correct when recurring instances are expanded.
+- **Agenda layout (small screens)** — meeting join control sits in the title row; the wide-layout column stays for `sm` and up.
+- **Event row spacing** — first row under each day heading (and under **Other**) uses top padding only; RSVP row alignment and gaps tightened slightly.
+
+## [0.3.5] - 2026-04-17
+
+### Added
+
+- **`canRsvp`** on `GET /api/events` rows — `true` when you appear as an attendee (including linked-account email matches) or when you own the event as organizer/creator.
+- **`.nvmrc`** (`22`) and **`engines.node`** in `package.json` — document supported Node major range (including Node 24+).
+
+### Changed
+
+- **`selfResponseStatus` / `declinedBySelf`** — resolved using **all linked Google account emails**, attendee rows that match those emails, and owner-created events without attendee entries (treated as accepted for display when you own the event).
+- **`POST /api/events/rsvp`** — allows RSVP when you own the event but have no attendee row yet; patches Google Calendar by adding/updating a self attendee with the chosen status.
+- **Conflict detection** (`computeConflictKeys`) — interval sweep after sorting by start time (same overlap results, less work on large lists).
+- **`src/proxy.ts`** — removed redundant early `NextResponse.next()` branches for paths the stack already handles.
+
+### Fixed
+
+- **`.gitignore`** — ignore `node_modules_corrupt_*/` (local recovery folders).
+
 ## [0.3.4] - 2026-04-17
 
 ### Added

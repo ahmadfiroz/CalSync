@@ -728,9 +728,9 @@ function RsvpActions({
   const rowClass = `text-xs ${muted ? "text-zinc-500" : "text-zinc-400"}`;
 
   return (
-    <div className={`flex min-w-0 items-center gap-1.5 ${rowClass}`}>
+    <div className={`flex min-w-0 items-start gap-1.5 ${rowClass}`}>
       <span
-        className="flex w-3 shrink-0 items-center justify-center"
+        className="flex h-4 w-3 shrink-0 items-center justify-center"
         aria-hidden="true"
       >
         <span
@@ -738,7 +738,7 @@ function RsvpActions({
         />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-1">
           <div className="relative inline-block max-w-full align-baseline focus-within:rounded-sm focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-zinc-500">
             <span className={labelClass}>{displayLabel}</span>
             <select
@@ -977,22 +977,33 @@ function AgendaEventRow({
   const muted = declined;
 
   const inner = (
-    <div className="flex flex-row items-start justify-between gap-3 sm:items-center sm:gap-6">
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <EventTitle ev={ev} muted={muted} />
-          {hasConflict ? (
-            <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95">
-              Conflict
-            </span>
-          ) : null}
-          {isPending ? (
-            <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/40 px-2 py-0.5 text-[11px] font-medium text-amber-400/90">
-              Invited
-            </span>
-          ) : null}
-          {headStatus ? (
-            <ListHeadTag status={headStatus} muted={muted} />
+    <div className="min-w-0 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-6">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex min-w-0 items-start justify-between gap-3 sm:block">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 pt-2 sm:pt-0">
+            <EventTitle ev={ev} muted={muted} />
+            {hasConflict ? (
+              <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95">
+                Conflict
+              </span>
+            ) : null}
+            {isPending ? (
+              <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/40 px-2 py-0.5 text-[11px] font-medium text-amber-400/90">
+                Invited
+              </span>
+            ) : null}
+            {headStatus ? (
+              <ListHeadTag status={headStatus} muted={muted} />
+            ) : null}
+          </div>
+          {ev.meetingUrl ? (
+            <div className="flex min-w-0 shrink-0 flex-col items-end self-start pt-0.5 sm:hidden">
+              <MeetingJoinLink
+                url={ev.meetingUrl}
+                mutedOutline={muted}
+                variant={muted || !isListHead ? "outline" : "primary"}
+              />
+            </div>
           ) : null}
         </div>
         <div
@@ -1119,7 +1130,7 @@ function AgendaEventRow({
         )}
       </div>
       {ev.meetingUrl ? (
-        <div className="flex min-w-0 shrink-0 flex-col items-end self-start pt-0.5 sm:min-w-[9rem] sm:self-center sm:pt-0">
+        <div className="hidden min-w-0 shrink-0 flex-col items-end self-center pt-0 sm:flex sm:min-w-[9rem]">
           <MeetingJoinLink
             url={ev.meetingUrl}
             mutedOutline={muted}
@@ -1577,11 +1588,6 @@ export default function Home() {
         (ev) => !ev.declinedBySelf || showDeclinedEvents
       ),
     [visibleEventRows, showDeclinedEvents]
-  );
-
-  const eventsGrouped = useMemo(
-    () => groupEventsByLocalDay(visibleEventRows),
-    [visibleEventRows]
   );
 
   const expandedGrouped = useMemo(
@@ -2177,7 +2183,7 @@ export default function Home() {
                 </p>
               ) : (
                 <div className="space-y-10">
-                  {eventsGrouped.groups.map((group, gi) => (
+                  {expandedGrouped.groups.map((group) => (
                     <div key={group.dayMs}>
                       <h3 className="sticky top-0 z-10 -mx-1 mb-3 border-b border-zinc-800/60 bg-[var(--background)] px-1 py-2 text-xs font-medium tracking-wide text-zinc-500">
                         {group.label}
@@ -2210,13 +2216,13 @@ export default function Home() {
                       </ul>
                     </div>
                   ))}
-                  {eventsGrouped.noDay.length > 0 ? (
+                  {expandedGrouped.noDay.length > 0 ? (
                     <div>
                       <h3 className="sticky top-0 z-10 -mx-1 mb-3 border-b border-zinc-800/60 bg-[var(--background)] px-1 py-2 text-xs font-medium tracking-wide text-zinc-500">
                         Other
                       </h3>
                       <ul className="flex flex-col">
-                        {eventsGrouped.noDay.map((ev, ni) => (
+                        {expandedGrouped.noDay.map((ev, ni) => (
                           <AgendaEventRow
                             key={`${ev.calendarId}-${ev.id ?? "noid"}-${ev.summary ?? ""}-nodate`}
                             ev={ev}
