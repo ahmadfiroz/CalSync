@@ -822,10 +822,7 @@ function TimezoneCombobox({
 
   const allZones = useMemo<string[]>(() => {
     try {
-      const zones = Intl.supportedValuesOf("timeZone") as string[];
-      // Remove known UTC aliases so "UTC" is the only zero-offset entry
-      const UTC_ALIASES = new Set(["Etc/GMT", "Etc/UTC", "Etc/GMT+0", "Etc/GMT-0", "Etc/UCT", "Etc/Universal", "Etc/Zulu", "GMT", "Greenwich"]);
-      return zones.filter((tz) => !UTC_ALIASES.has(tz));
+      return Intl.supportedValuesOf("timeZone") as string[];
     } catch {
       return [];
     }
