@@ -805,7 +805,7 @@ function tzDisplayName(tz: string): string {
   const short = tzLabel(tz);
   const offset = tzOffsetLabel(tz);
   const city = tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
-  return offset ? `${city} — ${short} (${offset})` : `${city} — ${short}`;
+  return `${city} — ${short}`;
 }
 
 function TimezoneCombobox({
