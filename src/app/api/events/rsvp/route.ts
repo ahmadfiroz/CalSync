@@ -100,10 +100,18 @@ export async function POST(req: NextRequest) {
         typeof recurringEventId === "string" && recurringEventId
           ? recurringEventId
           : eventId;
-      const timeMin =
-        typeof eventStartTime === "string" && eventStartTime
-          ? eventStartTime
-          : new Date().toISOString();
+
+      // Ensure timeMin is a valid RFC3339 datetime (all-day events use date-only strings)
+      const rawStart = typeof eventStartTime === "string" && eventStartTime
+        ? eventStartTime
+        : new Date().toISOString();
+      const timeMin = rawStart.includes("T") ? rawStart : `${rawStart}T00:00:00Z`;
+
+      // timeMax 2 years out — forces Google API to expand all future instances
+      // (without timeMax the API returns a limited window for open-ended series)
+      const timeMax = new Date();
+      timeMax.setFullYear(timeMax.getFullYear() + 2);
+      const timeMaxStr = timeMax.toISOString();
 
       // Get attendees template from the current instance
       const templateAttendees = await buildUpdatedAttendees(cal, calendarId, eventId, responseValue);
@@ -117,11 +125,12 @@ export async function POST(req: NextRequest) {
           calendarId,
           eventId: masterId,
           timeMin,
+          timeMax: timeMaxStr,
           maxResults: 500,
           pageToken,
         });
         for (const inst of res.data.items ?? []) {
-          if (inst.id) instanceIds.push(inst.id);
+          if (inst.id && inst.status !== "cancelled") instanceIds.push(inst.id);
         }
         pageToken = res.data.nextPageToken ?? undefined;
       } while (pageToken);
