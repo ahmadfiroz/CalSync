@@ -1312,6 +1312,56 @@ function DeclinedEventsSwitch({
   );
 }
 
+type StartNotification = {
+  id: string;
+  summary: string | null;
+  meetingUrl: string | null;
+};
+
+function EventStartToast({
+  notif,
+  onDismiss,
+}: {
+  notif: StartNotification;
+  onDismiss: () => void;
+}) {
+  useEffect(() => {
+    const id = window.setTimeout(onDismiss, 30_000);
+    return () => window.clearTimeout(id);
+  }, [onDismiss]);
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-zinc-700/60 bg-zinc-900 px-3 py-2.5 shadow-2xl ring-1 ring-black/20">
+      <div className="flex-1 min-w-0">
+        <p className="text-[11px] font-medium text-zinc-500 mb-0.5 uppercase tracking-wide">Starting now</p>
+        <p className="text-sm font-medium text-zinc-100 truncate">{notif.summary ?? "(No title)"}</p>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {notif.meetingUrl ? (
+          <a
+            href={notif.meetingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500 transition-colors"
+          >
+            Join
+          </a>
+        ) : null}
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="rounded-md p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -1549,6 +1599,19 @@ export default function Home() {
   );
 
   const [eventsNowTick, setEventsNowTick] = useState(0);
+  const notifiedEventIds = useRef(new Set<string>());
+  const [startNotifications, setStartNotifications] = useState<StartNotification[]>([]);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | null>(null);
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined") setNotifPermission(Notification.permission);
+  }, []);
+
+  const requestNotifPermission = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+    const result = await Notification.requestPermission();
+    setNotifPermission(result);
+  }, []);
   const [agendaNow, setAgendaNow] = useState<Date | null>(null);
   useEffect(() => {
     setAgendaNow(new Date());
@@ -1649,6 +1712,51 @@ export default function Home() {
     }, delay);
     return () => window.clearTimeout(id);
   }, [dashTab, eventsRows, eventsNowTick]);
+
+  useEffect(() => {
+    if (dashTab !== "events" || eventsRows.length === 0) return;
+    const nowMs = Date.now();
+    let nextStart = Infinity;
+    for (const ev of eventsRows) {
+      if (!ev.id) continue;
+      const bounds = eventTimedBounds(ev);
+      if (bounds && bounds.start > nowMs) nextStart = Math.min(nextStart, bounds.start);
+    }
+    if (!Number.isFinite(nextStart)) return;
+    const delay = Math.max(0, nextStart - nowMs) + 100;
+    const id = window.setTimeout(() => setEventsNowTick((t) => t + 1), delay);
+    return () => window.clearTimeout(id);
+  }, [dashTab, eventsRows, eventsNowTick]);
+
+  useEffect(() => {
+    if (dashTab !== "events") return;
+    const now = new Date();
+    const newNotifs: StartNotification[] = [];
+    for (const ev of eventsRows) {
+      if (!ev.id) continue;
+      const status = computeListHeadStatus(ev, now);
+      if (status?.type === "live_timed" && !notifiedEventIds.current.has(ev.id)) {
+        notifiedEventIds.current.add(ev.id);
+        newNotifs.push({ id: ev.id, summary: ev.summary, meetingUrl: ev.meetingUrl });
+      }
+    }
+    if (newNotifs.length > 0) {
+      setStartNotifications((prev) => [...prev, ...newNotifs]);
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        for (const notif of newNotifs) {
+          const n = new Notification(notif.summary ?? "(No title)", {
+            body: "Your meeting is starting now",
+            icon: "/logo.png",
+            tag: notif.id,
+          });
+          if (notif.meetingUrl) {
+            const url = notif.meetingUrl;
+            n.onclick = () => { window.open(url, "_blank"); n.close(); };
+          }
+        }
+      }
+    }
+  }, [eventsNowTick, eventsRows, dashTab]);
 
   useEffect(() => {
     if (dashTab !== "events" || !me?.connected) return;
@@ -2122,6 +2230,7 @@ export default function Home() {
                 />
                 <TimezoneCombobox value={viewTimezone} onChange={setViewTimezone} />
               </div>
+              <div className="flex items-center gap-2 shrink-0">
               {me?.connected ? (
                 <button
                   type="button"
@@ -2132,6 +2241,7 @@ export default function Home() {
                   New Event
                 </button>
               ) : null}
+              </div>
               </div>
               {eventsErr ? (
                 <p
@@ -2295,6 +2405,38 @@ export default function Home() {
               Each account&apos;s calendars appear together below. Sync can
               mirror busy times across calendars from different Google logins.
             </p>
+          </section>
+
+          <section className="space-y-3 border-t border-zinc-800/50 pt-8">
+            <h2 className="text-sm font-medium text-zinc-200">Notifications</h2>
+            {notifPermission === "granted" ? (
+              <div className="flex items-center gap-2 text-xs text-zinc-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                Browser notifications enabled — you&apos;ll get an alert when a meeting starts.
+              </div>
+            ) : notifPermission === "denied" ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-xs text-amber-400">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  Notifications blocked by browser.
+                </div>
+                <p className="text-[11px] leading-relaxed text-zinc-500">
+                  To re-enable: click the lock icon in your browser&apos;s address bar → Site settings → Notifications → Allow.
+                </p>
+              </div>
+            ) : notifPermission === "default" ? (
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => void requestNotifPermission()}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700/50 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                  Enable meeting alerts
+                </button>
+                <p className="text-[11px] text-zinc-600">Get a browser notification when a meeting starts.</p>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-4 border-t border-zinc-800/50 pt-8">
@@ -2912,6 +3054,20 @@ export default function Home() {
               </div>
             </form>
           </div>
+        </div>
+      ) : null}
+
+      {startNotifications.length > 0 ? (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-72">
+          {startNotifications.map((notif) => (
+            <EventStartToast
+              key={notif.id}
+              notif={notif}
+              onDismiss={() =>
+                setStartNotifications((prev) => prev.filter((n) => n.id !== notif.id))
+              }
+            />
+          ))}
         </div>
       ) : null}
     </main>
