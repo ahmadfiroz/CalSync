@@ -1759,6 +1759,39 @@ export default function Home() {
   }, [eventsNowTick, eventsRows, dashTab]);
 
   useEffect(() => {
+    const now = Date.now();
+    let best: { ms: number; summary: string | null; live: boolean } | null = null;
+    for (const ev of eventsRows) {
+      const bounds = eventTimedBounds(ev);
+      if (!bounds) continue;
+      if (now >= bounds.end) continue;
+      if (now >= bounds.start) {
+        if (!best || best.live === false) best = { ms: bounds.end - now, summary: ev.summary, live: true };
+      } else {
+        const ms = bounds.start - now;
+        if (!best || (!best.live && ms < best.ms)) best = { ms, summary: ev.summary, live: false };
+      }
+    }
+    if (!best) { document.title = "CalSync"; return; }
+    const name = (best.summary?.trim() || "(No title)").slice(0, 30);
+    let eta: string;
+    if (best.live) {
+      eta = "Now";
+    } else {
+      const ms = best.ms;
+      if (ms < 60_000) eta = "Starting soon";
+      else if (ms < 3_600_000) eta = `In ${Math.ceil(ms / 60_000)}m`;
+      else {
+        const h = Math.floor(ms / 3_600_000);
+        const m = Math.round((ms % 3_600_000) / 60_000);
+        eta = m === 0 ? `In ${h}h` : `In ${h}h ${m}m`;
+      }
+    }
+    document.title = `${eta} · ${name} — CalSync`;
+    return () => { document.title = "CalSync"; };
+  }, [eventsNowTick, eventsRows]);
+
+  useEffect(() => {
     if (dashTab !== "events" || !me?.connected) return;
     const ac = new AbortController();
     void loadEvents({ silent: false, signal: ac.signal });
