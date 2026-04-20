@@ -416,11 +416,31 @@ export async function GET(req: NextRequest) {
       return (a.summary ?? "").localeCompare(b.summary ?? "");
     });
 
+    // Deduplicate: same invite can appear in multiple source calendars (e.g. same event on two accounts)
+    const dedupMap = new Map<string, (typeof rows)[0]>();
+    const noIdRows: typeof rows = [];
+    for (const row of rows) {
+      if (!row.id) { noIdRows.push(row); continue; }
+      const existing = dedupMap.get(row.id);
+      if (!existing) {
+        dedupMap.set(row.id, row);
+      } else if (!existing.selfRsvp && row.selfRsvp) {
+        dedupMap.set(row.id, row);
+      }
+    }
+    const dedupedRows = [...dedupMap.values(), ...noIdRows];
+    dedupedRows.sort((a, b) => {
+      const ka = rowStartMs(a.start);
+      const kb = rowStartMs(b.start);
+      if (ka !== kb) return ka - kb;
+      return (a.summary ?? "").localeCompare(b.summary ?? "");
+    });
+
     return NextResponse.json({
       timeMin: timeMin.toISOString(),
       timeMax: timeMax.toISOString(),
       ...(legacyDays !== undefined ? { days: legacyDays } : {}),
-      events: rows,
+      events: dedupedRows,
       loadErrors,
       staleAccounts,
     });

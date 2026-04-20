@@ -1024,7 +1024,7 @@ function AgendaEventRow({
             <span className="min-w-0">{ev.accountEmail ?? "Google account"}</span>
           </p>
         ) : null}
-        {ev.selfRsvp != null && ev.id && ev.accountId && onRsvp ? (
+        {(ev.selfRsvp === "needsAction" || ev.isRecurring) && ev.selfRsvp != null && ev.id && ev.accountId && onRsvp ? (
           <div className="flex flex-col items-start gap-1">
             <div className="inline-flex items-center gap-0.5 rounded-md border border-zinc-800/60 bg-zinc-900/30 p-0.5">
               {(
