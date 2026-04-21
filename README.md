@@ -68,7 +68,8 @@ Edit `.env.local` using the reference table below and the comments in `.env.exam
 | `CALSYNC_ALLOWED_EMAILS` | Optional | Comma-separated Google emails allowed to sign in (useful on the public internet) |
 | `CALSYNC_WEBHOOK_TOKEN` | Optional | If set, Google push requests must send the same value in `X-Goog-Channel-Token` |
 | `CALSYNC_CRON_SECRET` | Optional | Protects `GET /api/cron/renew-watches` with `Authorization: Bearer <secret>` |
-| `CALSYNC_AUTO_SYNC_INTERVAL_SEC` | Optional | Poll sync every *N* seconds while the process runs (e.g. `120`), in addition to push |
+| `CALSYNC_AUTO_SYNC_INTERVAL_SEC` | Optional override | Poll sync every *N* seconds while the process runs. Defaults to `30` if unset; set `0` to disable polling. |
+| `CALSYNC_SYNC_COALESCE_TIMEOUT_SEC` | Optional | Max seconds a coalesced auto-sync can hold the in-memory per-user lock before stale-lock recovery (default `300`) |
 
 Google Calendar **push** needs a public **HTTPS** URL. Without it, push-related behavior is skipped (the cron route may report `no_https_public_url`).
 
@@ -144,7 +145,7 @@ Ensure `node`/`npm` are on `PATH` for the service user, or use full paths in `Ex
 ## Using the dashboard
 
 - **Upcoming events** — **Next 7 days**, **This month** (now through the end of the current calendar month), or **Next month** (full following calendar month), using your browser’s local timezone, for calendars in your **saved** sync group. Shows schedule, free transparency, optional Google Meet/Zoom/FaceTime links, and a link to Google Calendar. **RSVP** — when Google returns attendee data for an event, you can accept, tentatively accept, or decline from the row (updates sync to Calendar). Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
-- **Sync setup** — **Connected Google accounts** (add/remove, disconnect all). **Calendars in sync group** — choose at least two writable calendars; grouped by account with the **primary** calendar first. **Add calendar** creates a new calendar or adds by ID. **Save selection**, then **Run sync now**, or rely on push and optional polling (`CALSYNC_AUTO_SYNC_INTERVAL_SEC`). **Last sync** shows mirror counts and skip reasons.
+- **Sync setup** — **Connected Google accounts** (add/remove, disconnect all). **Calendars in sync group** — choose at least two writable calendars; grouped by account with the **primary** calendar first. **Add calendar** creates a new calendar or adds by ID. **Save selection**, then **Run sync now**, or rely on push plus built-in polling (defaults to 30s; configurable via `CALSYNC_AUTO_SYNC_INTERVAL_SEC`). **Last sync** shows mirror counts and skip reasons.
 
 Tokens and preferences live in **Supabase**; secure and back up that database.
 

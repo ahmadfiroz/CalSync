@@ -4,7 +4,37 @@ import { buildClientMapForCalendars } from "./accounts";
 import { isStoreConnected } from "./store";
 import { readStoreForUser } from "./store-db";
 
-const syncInFlight = new Map<string, Promise<SyncResult | null>>();
+type InFlightSync = {
+  startedAtMs: number;
+  promise: Promise<SyncResult | null>;
+};
+
+const syncInFlight = new Map<string, InFlightSync>();
+
+const DEFAULT_COALESCE_TIMEOUT_MS = 5 * 60 * 1000;
+const STALE_LOCK_BUFFER_MS = 15 * 1000;
+
+function coalesceTimeoutMs(): number {
+  const sec = Number(process.env.CALSYNC_SYNC_COALESCE_TIMEOUT_SEC);
+  if (!Number.isFinite(sec) || sec < 10) return DEFAULT_COALESCE_TIMEOUT_MS;
+  return Math.floor(sec * 1000);
+}
+
+async function withTimeout<T>(p: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`sync timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export async function performFullSyncForUser(
   userId: string
@@ -39,11 +69,24 @@ export async function performFullSyncForUser(
 export function performFullSyncCoalescedForUser(
   userId: string
 ): Promise<SyncResult | null> {
+  const now = Date.now();
+  const timeoutMs = coalesceTimeoutMs();
   const existing = syncInFlight.get(userId);
-  if (existing) return existing;
-  const p = performFullSyncForUser(userId).finally(() => {
+
+  if (existing) {
+    const ageMs = now - existing.startedAtMs;
+    if (ageMs < timeoutMs + STALE_LOCK_BUFFER_MS) {
+      return existing.promise;
+    }
+    // Recover from a stale in-memory lock so future auto-sync triggers can run.
     syncInFlight.delete(userId);
-  });
-  syncInFlight.set(userId, p);
+  }
+
+  const p = withTimeout(performFullSyncForUser(userId), timeoutMs)
+    .catch(() => null)
+    .finally(() => {
+      syncInFlight.delete(userId);
+    });
+  syncInFlight.set(userId, { startedAtMs: now, promise: p });
   return p;
 }

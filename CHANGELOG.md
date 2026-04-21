@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Auto-sync polling** now defaults to every **30 seconds** when `CALSYNC_AUTO_SYNC_INTERVAL_SEC` is unset, and can be disabled with `CALSYNC_AUTO_SYNC_INTERVAL_SEC=0`.
+- **Background polling sync path** now calls `performFullSyncForUser` (same core mechanism as manual **Run sync now**) for consistent behavior.
+- **Docs/env guidance** updated in `README.md` and `.env.example` to reflect the new default polling behavior and configuration.
+
+### Fixed
+
+- **Coalesced sync lock recovery** — stale in-memory per-user locks can now expire after a configurable timeout (`CALSYNC_SYNC_COALESCE_TIMEOUT_SEC`, default 300s), preventing intermittent auto-sync stalls after a hung run.
+
 ## [0.3.6] - 2026-04-17
 
 ### Changed

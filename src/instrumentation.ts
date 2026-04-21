@@ -5,18 +5,23 @@ export async function register() {
   if (g.__calsyncInstrumentation) return;
   g.__calsyncInstrumentation = true;
 
-  const sec = Number(process.env.CALSYNC_AUTO_SYNC_INTERVAL_SEC);
-  if (Number.isFinite(sec) && sec >= 30) {
-    const { performFullSyncCoalescedForUser } = await import(
-      "./lib/run-sync-from-store"
-    );
+  const configuredSec = Number(process.env.CALSYNC_AUTO_SYNC_INTERVAL_SEC);
+  const sec =
+    Number.isFinite(configuredSec) && configuredSec >= 30
+      ? Math.floor(configuredSec)
+      : 30;
+  const autoSyncEnabled =
+    !Number.isFinite(configuredSec) || configuredSec >= 30;
+  if (autoSyncEnabled) {
+    // Use the same sync mechanism as the manual "Run sync now" API.
+    const { performFullSyncForUser } = await import("./lib/run-sync-from-store");
     const { listUserIds } = await import("./lib/store-db");
     setInterval(() => {
       void (async () => {
         try {
           const ids = await listUserIds();
           for (const userId of ids) {
-            void performFullSyncCoalescedForUser(userId);
+            void performFullSyncForUser(userId);
           }
         } catch {
           /* missing Supabase env, etc. */
