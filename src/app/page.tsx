@@ -472,7 +472,7 @@ function eventRsvpActionKey(ev: ListedEvent): string {
 
 /** Events whose time range overlaps another visible (non-ended) agenda event. */
 /** Overlaps count as conflicts only when both events are still accepted (not declined). */
-function computeConflictKeys(events: ListedEvent[]): Set<string> {
+function computeConflictMap(events: ListedEvent[]): Map<string, string[]> {
   const withIv: {
     ev: ListedEvent;
     key: string;
@@ -488,19 +488,21 @@ function computeConflictKeys(events: ListedEvent[]): Set<string> {
     return a.iv.end - b.iv.end;
   });
 
-  const conflicted = new Set<string>();
+  const conflictMap = new Map<string, string[]>();
   let active: typeof withIv = [];
   for (const cur of withIv) {
     active = active.filter((item) => item.iv.end > cur.iv.start);
     for (const item of active) {
       if (!intervalsOverlap(item.iv, cur.iv)) continue;
       if (item.ev.declinedBySelf || cur.ev.declinedBySelf) continue;
-      conflicted.add(item.key);
-      conflicted.add(cur.key);
+      const curTitle = cur.ev.summary?.trim() || "(No title)";
+      const itemTitle = item.ev.summary?.trim() || "(No title)";
+      conflictMap.set(item.key, [...(conflictMap.get(item.key) ?? []), curTitle]);
+      conflictMap.set(cur.key, [...(conflictMap.get(cur.key) ?? []), itemTitle]);
     }
     active.push(cur);
   }
-  return conflicted;
+  return conflictMap;
 }
 
 /** All-day event: local calendar day `now` falls on an in-range day (end exclusive). */
@@ -920,7 +922,7 @@ function AgendaEventRow({
   isFirstInAgenda,
   viewTimezone,
   onRsvp,
-  hasConflict,
+  conflictsWith,
   rsvpBusy,
   onRsvpChange,
 }: {
@@ -932,7 +934,7 @@ function AgendaEventRow({
   isFirstInAgenda: boolean;
   viewTimezone?: string;
   onRsvp?: (calendarId: string, eventId: string, accountId: string, response: "accepted" | "declined" | "tentative", scope: "this" | "following" | "all", recurringEventId?: string, eventStartTime?: string) => void;
-  hasConflict: boolean;
+  conflictsWith: string[];
   rsvpBusy: boolean;
   onRsvpChange: (ev: ListedEvent, status: RsvpActionStatus) => void;
 }) {
@@ -964,9 +966,9 @@ function AgendaEventRow({
         <div className="flex min-w-0 items-start justify-between gap-3 sm:block">
           <div className="flex min-w-0 flex-wrap items-center gap-2 pt-2 sm:pt-0">
             <EventTitle ev={ev} muted={muted} />
-            {hasConflict ? (
+            {conflictsWith.length > 0 ? (
               <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95">
-                Conflict
+                Conflicts with {conflictsWith.join(", ")}
               </span>
             ) : null}
             {isPending ? (
@@ -1622,8 +1624,8 @@ export default function Home() {
     [eventsRows, agendaNow]
   );
 
-  const conflictKeys = useMemo(
-    () => computeConflictKeys(visibleEventRows),
+  const conflictMap = useMemo(
+    () => computeConflictMap(visibleEventRows),
     [visibleEventRows]
   );
 
@@ -2331,9 +2333,7 @@ export default function Home() {
                             isFirstInAgenda={gi === 0 && ei === 0}
                             viewTimezone={viewTimezone || undefined}
                             onRsvp={handleRsvp}
-                            hasConflict={conflictKeys.has(
-                              agendaEventStableKey(ev)
-                            )}
+                            conflictsWith={conflictMap.get(agendaEventStableKey(ev)) ?? []}
                             rsvpBusy={rsvpBusyKeys.has(eventRsvpActionKey(ev))}
                             onRsvpChange={updateRsvp}
                           />
@@ -2365,9 +2365,7 @@ export default function Home() {
                             }
                             viewTimezone={viewTimezone || undefined}
                             onRsvp={handleRsvp}
-                            hasConflict={conflictKeys.has(
-                              agendaEventStableKey(ev)
-                            )}
+                            conflictsWith={conflictMap.get(agendaEventStableKey(ev)) ?? []}
                             rsvpBusy={rsvpBusyKeys.has(eventRsvpActionKey(ev))}
                             onRsvpChange={updateRsvp}
                           />
