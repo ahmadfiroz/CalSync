@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4.0] - 2026-04-25
+
+### Added
+
+- **Timezone Messages tab** — paste message text to instantly see all time mentions converted across multiple timezones; message text and selected timezones persist across sessions via `localStorage`.
+- **Meeting start notifications** — browser notifications fire when a meeting is about to start, with a direct join button for video links.
+- **Browser tab countdown** — tab title shows time remaining to the next meeting (e.g. `⏰ 12m — CalSync`).
+- **Conflict badge shows event name** — the amber conflict pill now names the overlapping event.
+- **App icon and favicon** — new CalSync logo set as favicon and documented in README.
+
+### Fixed
+
+- **Cross-account event deduplication** — linked-account calendar events no longer appear twice in the agenda.
+- **RSVP for recurring events** — `timeMax` added and `timeMin` format corrected for "this and following" patch requests.
+- **Bare hour times in timezone converter** — parser now handles `3pm` / `10am` in addition to `3:00 PM`.
+- **Mobile notification settings** — settings page shows a fallback message on devices where `Notification` API is unavailable.
+- **Timezone picker labels** — removed redundant UTC offset string from dropdown options.
+- **Agenda first-item detection** — missing `gi` index in groups `map` callback no longer breaks top-padding logic.
+
 ## [0.3.6] - 2026-04-17
 
 ### Changed
