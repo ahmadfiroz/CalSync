@@ -75,7 +75,8 @@ Edit `.env.local` using the reference table below and the comments in `.env.exam
 | `CALSYNC_ALLOWED_EMAILS` | Optional | Comma-separated Google emails allowed to sign in (useful on the public internet) |
 | `CALSYNC_WEBHOOK_TOKEN` | Optional | If set, Google push requests must send the same value in `X-Goog-Channel-Token` |
 | `CALSYNC_CRON_SECRET` | Optional | Protects `GET /api/cron/renew-watches` with `Authorization: Bearer <secret>` |
-| `CALSYNC_AUTO_SYNC_INTERVAL_SEC` | Optional | Poll sync every *N* seconds while the process runs (e.g. `120`), in addition to push |
+| `CALSYNC_AUTO_SYNC_INTERVAL_SEC` | Optional override | Poll sync every *N* seconds while the process runs. Defaults to `30` if unset; set `0` to disable polling. |
+| `CALSYNC_SYNC_COALESCE_TIMEOUT_SEC` | Optional | Max seconds a coalesced auto-sync can hold the in-memory per-user lock before stale-lock recovery (default `300`) |
 
 Google Calendar **push** needs a public **HTTPS** URL. Without it, push-related behavior is skipped (the cron route may report `no_https_public_url`).
 
