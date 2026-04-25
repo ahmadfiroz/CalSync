@@ -7,7 +7,7 @@
 
 Self-hosted Google Calendar helper that mirrors **Busy** blocks across accounts using explicit **mirror rules**. Each rule directs busy events from one or more source calendars (on any connected Google account) into a destination calendar on a different account — so the destination account always shows when you are busy, without exposing event details. OAuth refresh tokens and mirror rules are stored per user in **Supabase** (Postgres). The app is **multi-user**: each Google sign-in gets an isolated CalSync account unless that Google identity was already linked (including via “Add another Google account”).
 
-**Latest release:** v0.3.1 (2026-04-09). See [Changelog](#changelog). **Release history:** [`CHANGELOG.md`](CHANGELOG.md).
+**Latest release:** v0.4.0 (2026-04-25). See [Changelog](#changelog). **Release history:** [`CHANGELOG.md`](CHANGELOG.md).
 
 Copy **`.env.example`** to **`.env.local`** and follow [Step-by-step setup](#step-by-step-setup), then [Run CalSync](#run-calsync). For a public HTTPS deployment, see [Recommended server configuration](#recommended-server-configuration).
 
@@ -150,10 +150,9 @@ Ensure `node`/`npm` are on `PATH` for the service user, or use full paths in `Ex
 
 ## Using the dashboard
 
-- **Upcoming events** — **Next 7 days**, **This month** (now through the end of the current calendar month), or **Next month** (full following calendar month), using your browser’s local timezone, for calendars in your **saved** sync group. Shows schedule, free transparency, optional Google Meet/Zoom/FaceTime links, and a link to Google Calendar. **RSVP** — when Google returns attendee data for an event, you can accept, tentatively accept, or decline from the row (updates sync to Calendar). Overlapping busy intervals show a **Conflict** badge (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and after sync or clear-mirrors.
-- **Sync setup** — **Connected Google accounts** (add/remove, disconnect all). **Calendars in sync group** — choose at least two writable calendars; grouped by account with the **primary** calendar first. **Add calendar** creates a new calendar or adds by ID. **Save selection**, then **Run sync now**, or rely on push and optional polling (`CALSYNC_AUTO_SYNC_INTERVAL_SEC`). **Last sync** shows mirror counts and skip reasons.
-
-- **Upcoming events** (default) — Lists events in the next 7 days, this month, or next month for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/video links, and a link to open the event in Google Calendar. Use **Declined events** to show or hide invitations you declined (hidden by default; shown rows are muted with a **Declined** badge). The list uses a short loading skeleton, refreshes in the background about every minute while the tab is visible, and reloads after sync and clear-mirrors actions.
+- **Upcoming events** (default) — Lists events in the next 7 days, this month, or next month for calendars in your **saved** sync group only. Shows schedule, “free” transparency when Google marks the event that way, optional Meet/Zoom/FaceTime video links, and a link to open the event in Google Calendar. **RSVP** — accept, tentatively accept, or decline directly from the row when Google returns attendee data. Overlapping busy intervals show a **Conflict** badge naming the other event (self-declined RSVPs excluded). **Declined events** toggles invitations you declined. The list refreshes in the background about every minute while visible, and reloads after sync and clear-mirrors actions. The **browser tab title** counts down to the next meeting.
+- **Notifications** — Grant browser notification permission in **Settings** to receive a popup when a meeting is about to start; the notification includes a **Join** button for events with a video link. Devices without `Notification` API support see an explanatory message instead.
+- **Timezone Messages** — Paste any message containing times (e.g. `3pm`, `10:30 AM`) and pick one or more target timezones; CalSync converts every time mention inline and appends your local timezone automatically. Message text and timezone selections persist across sessions.
 - **Sync setup** — Manage Google accounts and mirror rules:
   - **Connected Google accounts** — Add another account, remove one, or **Disconnect all**. Calendars from every linked account are available for use in mirror rules.
   - **Mirror rules** — Each rule defines a directed sync: pick a **source account** and one or more **source calendars** to read busy blocks from, then pick a **destination account** and **destination calendar** to write the mirrors into. Source and destination must be different Google accounts. Set the destination calendar to **”Auto (CalSync calendar)”** to let CalSync find or create a calendar named “CalSync” on the destination account automatically. You can have multiple rules — for example, mirror your work calendar into your personal account and vice versa.
@@ -176,6 +175,16 @@ Refresh tokens and preferences live in your **Supabase** project. Back up and se
 | `npm run lint` | ESLint |
 
 ## Changelog
+
+### [0.4.0] — 2026-04-25
+
+- **Timezone Messages tab** — paste message text to see all time mentions converted across multiple timezones; message text and selected timezones persist across sessions via `localStorage`.
+- **Meeting start notifications** — browser notifications fire when a meeting is about to start, with a direct join button for video links.
+- **Browser tab countdown** — tab title shows time remaining to the next meeting.
+- **Conflict badge names the event** — the amber conflict pill now shows the name of the overlapping event.
+- **App icon and favicon** — new CalSync logo.
+- **Cross-account event deduplication** — linked-account calendar events no longer appear twice in the agenda.
+- **Bare hour times in timezone converter** — parser handles `3pm` / `10am` in addition to `3:00 PM`.
 
 ### [0.3.1] — 2026-04-09
 
