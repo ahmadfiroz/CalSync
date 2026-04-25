@@ -913,6 +913,319 @@ function TimezoneCombobox({
   );
 }
 
+// ─── Timezone Messages ────────────────────────────────────────────────────────
+
+function tzCityName(tz: string): string {
+  return tz.split("/").pop()?.replace(/_/g, " ") ?? tz;
+}
+
+/** Format a time (Date) in a specific IANA timezone, 12h with no seconds. */
+function formatTimeInZone(d: Date, tz: string): string {
+  return d.toLocaleTimeString("en", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+  });
+}
+
+/**
+ * Given a raw message like "... 8:00AM to 10:00AM ..."
+ * and a local timezone + list of additional timezones,
+ * append the converted times in parentheses.
+ *
+ * Strategy: find all HH:MM[AM|PM] tokens, parse them relative to today in
+ * localTz, convert to each extra zone.
+ */
+/** Parse a time string like "8:00AM" or "10:00 PM" into a UTC Date anchored to today in localTz. */
+function parseTimeInZone(timeStr: string, tz: string): Date | null {
+  try {
+    const cleaned = timeStr.replace(/\s/g, "").toUpperCase();
+    const isPM = cleaned.endsWith("PM");
+    const isAM = cleaned.endsWith("AM");
+    const digits = cleaned.replace(/(AM|PM)/, "");
+    const [hStr, mStr] = digits.split(":");
+    let h = parseInt(hStr, 10);
+    const m = parseInt(mStr, 10);
+    if (isNaN(h) || isNaN(m)) return null;
+    if (isPM && h !== 12) h += 12;
+    if (isAM && h === 12) h = 0;
+
+    const now = new Date();
+    const localParts = new Intl.DateTimeFormat("en", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const year = parseInt(localParts.find((p) => p.type === "year")!.value, 10);
+    const month = parseInt(localParts.find((p) => p.type === "month")!.value, 10) - 1;
+    const day = parseInt(localParts.find((p) => p.type === "day")!.value, 10);
+
+    const probe = new Date(Date.UTC(year, month, day, h, m, 0));
+    const shown = new Intl.DateTimeFormat("en", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(probe);
+    const [shH, shM] = shown.split(":").map(Number);
+    const diffMs = (h * 60 + m - (shH * 60 + shM)) * 60_000;
+    return new Date(probe.getTime() + diffMs);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find each time-range pattern (e.g. "8:00AM to 10:00AM", "8:00 AM - 10:00 AM",
+ * "8:00AM–10:00AM") and insert the extra-timezone conversions immediately after it.
+ * If the local timezone name/label is not already present in the text, prepend it
+ * to each bracket so readers know the base reference.
+ */
+function buildConvertedMessage(
+  rawText: string,
+  localTz: string,
+  extraZones: string[]
+): string {
+  if (!rawText.trim() || extraZones.length === 0) return rawText;
+
+  // Check whether the local tz is already referenced by city name or short label.
+  const textLower = rawText.toLowerCase();
+  const localCity = tzCityName(localTz).toLowerCase();
+  const localShort = tzLabel(localTz).toLowerCase();
+  const localAlreadyPresent =
+    textLower.includes(localCity) || (localShort.length > 0 && textLower.includes(localShort));
+
+  const TIME = /\d{1,2}:\d{2}\s*[AP]M/i.source;
+  const SEP = /\s*(?:to|-|–|—)\s*/.source;
+  const rangeRe = new RegExp(`(${TIME})(${SEP})(${TIME})`, "gi");
+
+  return rawText.replace(rangeRe, (match, t1, sep, t2) => {
+    const d1 = parseTimeInZone(t1, localTz);
+    const d2 = parseTimeInZone(t2, localTz);
+    if (!d1 || !d2) return match;
+
+    const zoneParts = extraZones.map((tz) => {
+      const c1 = formatTimeInZone(d1, tz);
+      const c2 = formatTimeInZone(d2, tz);
+      return `${tzCityName(tz)} Time: ${c1}–${c2}`;
+    });
+
+    const localLabel = localAlreadyPresent ? "" : ` ${tzCityName(localTz)} Time`;
+    return `${match}${localLabel} (${zoneParts.join(", ")})`;
+  });
+}
+
+const TZ_MESSAGES_STORAGE_KEY = "calsync:tz-message-zones";
+
+function TimezoneMessagesTab() {
+  const localTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
+  const [extraZones, setExtraZones] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(TZ_MESSAGES_STORAGE_KEY);
+      if (saved) return JSON.parse(saved) as string[];
+    } catch {}
+    return [];
+  });
+  const [rawText, setRawText] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TZ_MESSAGES_STORAGE_KEY, JSON.stringify(extraZones));
+    } catch {}
+  }, [extraZones]);
+
+  const result = useMemo(
+    () => buildConvertedMessage(rawText, localTz, extraZones),
+    [rawText, localTz, extraZones]
+  );
+
+  function addZone(tz: string) {
+    if (!tz || extraZones.includes(tz)) return;
+    setExtraZones((z) => [...z, tz]);
+  }
+
+  function removeZone(tz: string) {
+    setExtraZones((z) => z.filter((x) => x !== tz));
+  }
+
+  function copyResult() {
+    void navigator.clipboard.writeText(result).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  }
+
+  return (
+    <section className="space-y-5">
+      <div>
+        <h2 className="text-sm font-medium text-zinc-200">Timezone Messages</h2>
+        <p className="mt-1 text-xs text-zinc-500">
+          Detected local timezone: <span className="text-zinc-300">{tzDisplayName(localTz)}</span>
+        </p>
+      </div>
+
+      {/* Zone picker */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-zinc-400">Add timezones to convert into</p>
+        <TzMessageCombobox onAdd={addZone} existingZones={extraZones} />
+        {extraZones.length > 0 && (
+          <ul className="flex flex-wrap gap-2 pt-1">
+            {extraZones.map((tz) => (
+              <li
+                key={tz}
+                className="flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-300"
+              >
+                <span>{tzDisplayName(tz)}</span>
+                <button
+                  type="button"
+                  onClick={() => removeZone(tz)}
+                  className="text-zinc-600 hover:text-zinc-300"
+                  aria-label={`Remove ${tz}`}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-3 w-3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Input */}
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-zinc-400">Your message</label>
+        <textarea
+          rows={4}
+          value={rawText}
+          onChange={(e) => setRawText(e.target.value)}
+          placeholder={`e.g. I will be unavailable from 8:00AM to 10:00AM`}
+          className="w-full resize-y rounded-md border border-zinc-800/50 bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none"
+        />
+      </div>
+
+      {/* Output */}
+      {rawText.trim() ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-zinc-400">Converted message</label>
+            <button
+              type="button"
+              onClick={copyResult}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              {copied ? (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 text-green-400"><path d="M20 6 9 17l-5-5"/></svg>
+                  <span className="text-green-400">Copied</span>
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                  Copy
+                </>
+              )}
+            </button>
+          </div>
+          <div className="min-h-[4rem] rounded-md border border-zinc-800/50 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-100 whitespace-pre-wrap">
+            {result}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/** Combobox variant for the timezone messages tab — adds on select (no clear). */
+function TzMessageCombobox({
+  onAdd,
+  existingZones,
+}: {
+  onAdd: (tz: string) => void;
+  existingZones: string[];
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const allZones = useMemo<string[]>(() => {
+    try {
+      return Intl.supportedValuesOf("timeZone") as string[];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const candidates = q
+      ? allZones.filter(
+          (tz) =>
+            tz.toLowerCase().includes(q) ||
+            tzLabel(tz).toLowerCase().includes(q) ||
+            tzOffsetLabel(tz).toLowerCase().includes(q)
+        )
+      : allZones;
+    return candidates.filter((tz) => !existingZones.includes(tz)).slice(0, 80);
+  }, [query, allZones, existingZones]);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  function select(tz: string) {
+    onAdd(tz);
+    setQuery("");
+    setOpen(false);
+    inputRef.current?.focus();
+  }
+
+  return (
+    <div ref={containerRef} className="relative inline-flex flex-col gap-1">
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Search timezone…"
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          className="w-56 rounded-md border border-zinc-800/50 bg-transparent py-2 pl-3 pr-8 text-sm text-zinc-100 placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
+        />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      </div>
+      {open && (
+        <ul className="absolute left-0 top-full z-50 mt-1 max-h-60 w-72 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950 py-1 shadow-xl">
+          {filtered.map((tz) => (
+            <li key={tz}>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); select(tz); }}
+                className="w-full px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100"
+              >
+                <span className="block truncate">{tzDisplayName(tz)}</span>
+                <span className="block truncate text-[11px] text-zinc-600">{tz}</span>
+              </button>
+            </li>
+          ))}
+          {filtered.length === 0 && (
+            <li className="px-3 py-2 text-sm text-zinc-600">No timezones found</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 function AgendaEventRow({
   ev,
   groupDayMs,
@@ -1391,7 +1704,7 @@ export default function Home() {
     };
   } | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [dashTab, setDashTab] = useState<"sync" | "events">("events");
+  const [dashTab, setDashTab] = useState<"sync" | "events" | "tz-messages">("events");
   const [eventsRange, setEventsRange] = useState<EventsRangePreset>("7d");
   const [showDeclinedEvents, setShowDeclinedEvents] = useState(false);
   const [viewTimezone, setViewTimezone] = useState<string>(""); // "" = local
@@ -2231,6 +2544,19 @@ export default function Home() {
             >
               Settings
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={dashTab === "tz-messages"}
+              onClick={() => setDashTab("tz-messages")}
+              className={`-mb-px cursor-pointer border-b-2 pb-3 font-medium transition-colors ${
+                dashTab === "tz-messages"
+                  ? "border-zinc-100 text-zinc-100"
+                  : "border-transparent text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              Timezone Messages
+            </button>
           </div>
 
           {dashTab === "events" ? (
@@ -2920,6 +3246,8 @@ export default function Home() {
           ) : null}
             </>
           ) : null}
+
+          {dashTab === "tz-messages" ? <TimezoneMessagesTab /> : null}
         </div>
       )}
       {/* Create Event Modal */}
