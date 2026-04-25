@@ -1017,6 +1017,7 @@ function buildConvertedMessage(
 }
 
 const TZ_MESSAGES_STORAGE_KEY = "calsync:tz-message-zones";
+const TZ_MESSAGES_TEXT_KEY = "calsync:tz-message-text";
 
 function TimezoneMessagesTab() {
   const localTz = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
@@ -1027,7 +1028,9 @@ function TimezoneMessagesTab() {
     } catch {}
     return [];
   });
-  const [rawText, setRawText] = useState("");
+  const [rawText, setRawText] = useState(() => {
+    try { return localStorage.getItem(TZ_MESSAGES_TEXT_KEY) ?? ""; } catch { return ""; }
+  });
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -1035,6 +1038,10 @@ function TimezoneMessagesTab() {
       localStorage.setItem(TZ_MESSAGES_STORAGE_KEY, JSON.stringify(extraZones));
     } catch {}
   }, [extraZones]);
+
+  useEffect(() => {
+    try { localStorage.setItem(TZ_MESSAGES_TEXT_KEY, rawText); } catch {}
+  }, [rawText]);
 
   const result = useMemo(
     () => buildConvertedMessage(rawText, localTz, extraZones),
