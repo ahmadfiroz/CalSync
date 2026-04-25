@@ -2793,7 +2793,9 @@ export default function Home() {
                 </button>
                 <p className="text-[11px] text-zinc-600">Get a browser notification when a meeting starts.</p>
               </div>
-            ) : null}
+            ) : (
+              <p className="text-[11px] text-zinc-500">Browser notifications not supported on this device.</p>
+            )}
           </section>
 
           <section className="space-y-4 border-t border-zinc-800/50 pt-8">
