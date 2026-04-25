@@ -945,7 +945,7 @@ function parseTimeInZone(timeStr: string, tz: string): Date | null {
     const digits = cleaned.replace(/(AM|PM)/, "");
     const [hStr, mStr] = digits.split(":");
     let h = parseInt(hStr, 10);
-    const m = parseInt(mStr, 10);
+    const m = mStr !== undefined ? parseInt(mStr, 10) : 0;
     if (isNaN(h) || isNaN(m)) return null;
     if (isPM && h !== 12) h += 12;
     if (isAM && h === 12) h = 0;
@@ -996,7 +996,7 @@ function buildConvertedMessage(
   const localAlreadyPresent =
     textLower.includes(localCity) || (localShort.length > 0 && textLower.includes(localShort));
 
-  const TIME = /\d{1,2}:\d{2}\s*[AP]M/i.source;
+  const TIME = /\d{1,2}(?::\d{2})?\s*[AP]M/i.source;
   const SEP = /\s*(?:to|-|–|—)\s*/.source;
   const rangeRe = new RegExp(`(${TIME})(${SEP})(${TIME})`, "gi");
 
