@@ -998,21 +998,34 @@ function buildConvertedMessage(
 
   const TIME = /\d{1,2}(?::\d{2})?\s*[AP]M/i.source;
   const SEP = /\s*(?:to|-|–|—)\s*/.source;
-  const rangeRe = new RegExp(`(${TIME})(${SEP})(${TIME})`, "gi");
+  // Range pattern first so it takes priority over single-time match.
+  const combinedRe = new RegExp(`(${TIME})(${SEP})(${TIME})|(${TIME})`, "gi");
 
-  return rawText.replace(rangeRe, (match, t1, sep, t2) => {
-    const d1 = parseTimeInZone(t1, localTz);
-    const d2 = parseTimeInZone(t2, localTz);
-    if (!d1 || !d2) return match;
+  return rawText.replace(combinedRe, (match, t1, sep, t2, tSingle) => {
+    if (t1 && t2) {
+      const d1 = parseTimeInZone(t1, localTz);
+      const d2 = parseTimeInZone(t2, localTz);
+      if (!d1 || !d2) return match;
 
-    const zoneParts = extraZones.map((tz) => {
-      const c1 = formatTimeInZone(d1, tz);
-      const c2 = formatTimeInZone(d2, tz);
-      return `${tzCityName(tz)} Time: ${c1}–${c2}`;
-    });
+      const zoneParts = extraZones.map((tz) => {
+        const c1 = formatTimeInZone(d1, tz);
+        const c2 = formatTimeInZone(d2, tz);
+        return `${tzCityName(tz)} Time: ${c1}–${c2}`;
+      });
 
-    const localLabel = localAlreadyPresent ? "" : ` ${tzCityName(localTz)} Time`;
-    return `${match}${localLabel} (${zoneParts.join(", ")})`;
+      const localLabel = localAlreadyPresent ? "" : ` ${tzCityName(localTz)} Time`;
+      return `${match}${localLabel} (${zoneParts.join(", ")})`;
+    } else {
+      const d = parseTimeInZone(tSingle, localTz);
+      if (!d) return match;
+
+      const zoneParts = extraZones.map((tz) => {
+        return `${tzCityName(tz)} Time: ${formatTimeInZone(d, tz)}`;
+      });
+
+      const localLabel = localAlreadyPresent ? "" : ` ${tzCityName(localTz)} Time`;
+      return `${match}${localLabel} (${zoneParts.join(", ")})`;
+    }
   });
 }
 
