@@ -1272,6 +1272,7 @@ function AgendaEventRow({
   onRsvpChange: (ev: ListedEvent, status: RsvpActionStatus) => void;
 }) {
   const [pendingResponse, setPendingResponse] = useState<"accepted" | "declined" | "tentative" | null>(null);
+  const [conflictsExpanded, setConflictsExpanded] = useState(false);
   const isTimed = Boolean(ev.start?.dateTime);
   const localTzLabel = isTimed ? tzLabel() : "";
   const altTzLabel = isTimed && viewTimezone ? tzLabel(viewTimezone) : "";
@@ -1300,8 +1301,13 @@ function AgendaEventRow({
           <div className="flex min-w-0 flex-wrap items-center gap-2 pt-2 sm:pt-0">
             <EventTitle ev={ev} muted={muted} />
             {conflictsWith.length > 0 ? (
-              <span className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95">
-                Conflicts with {conflictsWith.join(", ")}
+              <span
+                className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95 cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); e.preventDefault(); setConflictsExpanded(v => !v); }}
+              >
+                {conflictsExpanded
+                  ? `Conflicts with ${conflictsWith.join(", ")}`
+                  : `Conflicts with ${conflictsWith.slice(0, 2).join(", ")}${conflictsWith.length > 2 ? ` +${conflictsWith.length - 2} more` : ""}`}
               </span>
             ) : null}
             {isPending ? (
