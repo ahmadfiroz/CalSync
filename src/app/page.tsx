@@ -1302,7 +1302,8 @@ function AgendaEventRow({
             <EventTitle ev={ev} muted={muted} />
             {conflictsWith.length > 0 ? (
               <span
-                className="inline-flex shrink-0 items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95 cursor-pointer"
+                className="inline-flex cursor-pointer items-center rounded-full border border-amber-700/50 bg-amber-950/45 px-2 py-0.5 text-[11px] font-medium text-amber-200/95"
+                style={conflictsExpanded ? { maxWidth: "100%", whiteSpace: "normal" } : undefined}
                 onClick={(e) => { e.stopPropagation(); e.preventDefault(); setConflictsExpanded(v => !v); }}
               >
                 {conflictsExpanded
